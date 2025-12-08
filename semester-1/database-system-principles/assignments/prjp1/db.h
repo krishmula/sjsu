@@ -173,16 +173,17 @@ typedef enum t_value {
 } token_value;
 
 /* This constants must be updated when add new keywords */
-#define TOTAL_KEYWORDS_PLUS_TYPE_NAMES 30
+#define TOTAL_KEYWORDS_PLUS_TYPE_NAMES 32
 
 /* New keyword must be added in the same position/order as the enum
    definition above, otherwise the lookup will be wrong */
-char *keyword_table[] = {"int",    "varchar", "char",   "create", "table",
-                         "not",    "null",    "drop",   "list",   "schema",
-                         "for",    "to",      "insert", "into",   "values",
-                         "delete", "from",    "where",  "update", "set",
-                         "select", "order",   "by",     "desc",   "is",
-                         "and",    "or",      "sum",    "avg",    "count"};
+const char *keyword_table[] = {"int",    "varchar", "char",   "create", "table",
+                          "not",    "null",    "drop",   "list",   "schema",
+                          "for",    "to",      "insert", "into",   "values",
+                          "delete", "from",    "where",  "update", "set",
+                          "select", "order",   "by",     "desc",   "is",
+                          "and",    "or",      "natural", "join",  "sum",
+                          "avg",    "count"};
 
 /* This enum defines a set of possible statements */
 typedef enum s_statement {
@@ -220,7 +221,7 @@ typedef enum error_return_codes {
 
 /* Set of function prototypes */
 int get_token(char *command, token_list **tok_list);
-void add_to_list(token_list **tok_list, char *tmp, int t_class, int t_value);
+void add_to_list(token_list **tok_list, const char *tmp, int t_class, int t_value);
 int do_semantic(token_list *tok_list);
 int sem_create_table(token_list *t_list);
 int sem_drop_table(token_list *t_list);

@@ -10,6 +10,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <vector>
+#include <algorithm>
+#include <string>
+#include <iostream>
 
 #if defined(_WIN32) || defined(_WIN64)
 #define strcasecmp _stricmp
@@ -238,7 +242,7 @@ int get_token(char *command, token_list **tok_list) {
   return rc;
 }
 
-void add_to_list(token_list **tok_list, char *tmp, int t_class, int t_value) {
+void add_to_list(token_list **tok_list, const char *tmp, int t_class, int t_value) {
   token_list *cur = *tok_list;
   token_list *ptr = NULL;
 
@@ -1976,658 +1980,622 @@ int sem_update_table(token_list *t_list)
   return rc;
 }
 
-int sem_select(token_list *t_list)
-{
-  int rc = 0;
-  token_list *cur_token = t_list;
-  tpd_entry *l_table_descriptor = NULL;
-  tpd_entry *r_table_descriptor = NULL;
 
-  char l_table_name[MAX_IDENT_LEN + 1] = {0};
-  char r_table_name[MAX_IDENT_LEN + 1] = {0};
-  char filename[MAX_IDENT_LEN + 5]     = {0};
+struct SelectCondition {
+    char col_name[MAX_IDENT_LEN + 1];
+    int rel_op; 
+    bool is_null_check;
+    bool is_not_null_check;
+    int val_type; 
+    int int_val;
+    char str_val[MAX_TOK_LEN];
+    int logic_op; // K_AND, K_OR, 0
+};
 
-  bool do_join = false;
+struct OrderBy {
+    char col_name[MAX_IDENT_LEN + 1];
+    bool desc;
+};
 
-  bool has_where       = false;
-  int  where_col_index = -1;
-  int  where_rel_op    = 0;   
+struct ResultRow {
+    std::vector<unsigned char> l_rec;
+    std::vector<unsigned char> r_rec;
+};
 
-  bool where_is_null   = false;
-  bool where_is_int    = false;
-  bool where_is_string = false;
-
-  int  where_int_value = 0;
-  char where_str_value[MAX_TOK_LEN] = {0};
-  int  where_str_len   = 0;
-
-
-  if ((cur_token == NULL) || (cur_token->tok_value != S_STAR))
-  {
-    rc = INVALID_STATEMENT;
-    if (cur_token) cur_token->tok_value = INVALID;
-    return rc;
-  }
-  cur_token = cur_token->next;   
-
-  if ((cur_token == NULL) || (cur_token->tok_value != K_FROM))
-  {
-    rc = INVALID_STATEMENT;
-    if (cur_token) cur_token->tok_value = INVALID;
-    return rc;
-  }
-  cur_token = cur_token->next;   
-
-  if ((cur_token == NULL) ||
-      ((cur_token->tok_class != keyword) &&
-       (cur_token->tok_class != identifier) &&
-       (cur_token->tok_class != type_name)))
-  {
-    rc = INVALID_TABLE_NAME;
-    if (cur_token) cur_token->tok_value = INVALID;
-    return rc;
-  }
-
-  strcpy(l_table_name, cur_token->tok_string);
-
-  if ((l_table_descriptor = get_tpd_from_list(l_table_name)) == NULL)
-  {
-    rc = TABLE_NOT_EXIST;
-    if (cur_token) cur_token->tok_value = INVALID;
-    return rc;
-  }
-
-  cur_token = cur_token->next;   
-
-  if ((cur_token != NULL) &&
-      (cur_token->tok_class == identifier) &&
-      (strcasecmp(cur_token->tok_string, "natural") == 0))
-  {
-    token_list *t_join  = cur_token->next;
-    token_list *t_rname = (t_join ? t_join->next : NULL);
-
-    if ((t_join == NULL) ||
-        (t_join->tok_class != identifier) ||
-        (strcasecmp(t_join->tok_string, "join") != 0))
-    {
-      rc = INVALID_STATEMENT;
-      if (t_join) t_join->tok_value = INVALID;
-      return rc;
-    }
-
-    if ((t_rname == NULL) ||
-        ((t_rname->tok_class != keyword) &&
-         (t_rname->tok_class != identifier) &&
-         (t_rname->tok_class != type_name)))
-    {
-      rc = INVALID_TABLE_NAME;
-      if (t_rname) t_rname->tok_value = INVALID;
-      return rc;
-    }
-
-    strcpy(r_table_name, t_rname->tok_string);
-
-    if ((r_table_descriptor = get_tpd_from_list(r_table_name)) == NULL)
-    {
-      rc = TABLE_NOT_EXIST;
-      t_rname->tok_value = INVALID;
-      return rc;
-    }
-
-    do_join = true;
-    cur_token = t_rname->next;   
-  }
-
-  if ((cur_token != NULL) && (cur_token->tok_value == K_WHERE))
-  {
-    if (do_join)
-    {
-      rc = INVALID_STATEMENT;
-      cur_token->tok_value = INVALID;
-      return rc;
-    }
-
-    has_where = true;
-    cur_token = cur_token->next;   
-
-    if ((cur_token == NULL) ||
-        ((cur_token->tok_class != keyword) &&
-         (cur_token->tok_class != identifier) &&
-         (cur_token->tok_class != type_name)))
-    {
-      rc = INVALID_COLUMN_NAME;
-      if (cur_token) cur_token->tok_value = INVALID;
-      return rc;
-    }
-
-    cd_entry *l_cols = (cd_entry*)((char*)l_table_descriptor + l_table_descriptor->cd_offset);
-    where_col_index = -1;
-    for (int i = 0; i < l_table_descriptor->num_columns; i++)
-    {
-      if (strcasecmp(l_cols[i].col_name, cur_token->tok_string) == 0)
-      {
-        where_col_index = i;
-        break;
-      }
-    }
-    if (where_col_index < 0)
-    {
-      rc = INVALID_COLUMN_NAME;
-      cur_token->tok_value = INVALID;
-      return rc;
-    }
-
-    cur_token = cur_token->next;   
-
-    if ((cur_token == NULL) ||
-        !((cur_token->tok_value == S_EQUAL) ||
-          (cur_token->tok_value == S_GREATER) ||
-          (cur_token->tok_value == S_LESS)))
-    {
-      rc = INVALID_STATEMENT;
-      if (cur_token) cur_token->tok_value = INVALID;
-      return rc;
-    }
-
-    where_rel_op = cur_token->tok_value;
-    cur_token = cur_token->next;  
-
-    if (cur_token == NULL)
-    {
-      rc = INVALID_STATEMENT;
-      return rc;
-    }
-
-    int col_type = l_cols[where_col_index].col_type;
-    int col_len  = l_cols[where_col_index].col_len;
-
-    if (cur_token->tok_value == K_NULL)
-    {
-      where_is_null   = true;
-      where_is_int    = false;
-      where_is_string = false;
-
-      if (where_rel_op != S_EQUAL)
-      {
-        rc = INVALID_STATEMENT;
-        cur_token->tok_value = INVALID;
-        return rc;
-      }
-    }
-    else if (cur_token->tok_value == INT_LITERAL)
-    {
-      if (col_type != T_INT)
-      {
-        rc = INVALID_STATEMENT;
-        cur_token->tok_value = INVALID;
-        return rc;
-      }
-
-      where_is_int    = true;
-      where_is_null   = false;
-      where_is_string = false;
-      where_int_value = atoi(cur_token->tok_string);
-    }
-    else if (cur_token->tok_value == STRING_LITERAL)
-    {
-      if (col_type != T_CHAR)
-      {
-        rc = INVALID_STATEMENT;
-        cur_token->tok_value = INVALID;
-        return rc;
-      }
-
-      where_is_string = true;
-      where_is_null   = false;
-      where_is_int    = false;
-
-      memset(where_str_value, '\0', sizeof(where_str_value));
-      strcpy(where_str_value, cur_token->tok_string);
-      where_str_len = (int)strlen(where_str_value);
-
-      if (where_str_len > col_len)
-      {
-        rc = INVALID_STATEMENT;
-        cur_token->tok_value = INVALID;
-        return rc;
-      }
-    }
-    else
-    {
-      rc = INVALID_STATEMENT;
-      cur_token->tok_value = INVALID;
-      return rc;
-    }
-
-    cur_token = cur_token->next;   /* should be EOC */
-  }
-
-  /* EOC */
-  if ((cur_token != NULL) && (cur_token->tok_value != EOC))
-  {
-    rc = INVALID_STATEMENT;
-    cur_token->tok_value = INVALID;
-    return rc;
-  }
-
-  table_file_header l_hdr;
-  FILE *l_fh = NULL;
-
-  memset(filename, '\0', sizeof(filename));
-  snprintf(filename, sizeof(filename), "%s.tab", l_table_name);
-
-  if ((l_fh = fopen(filename, "rb")) == NULL)
-    return FILE_OPEN_ERROR;
-
-  if (fread(&l_hdr, sizeof(table_file_header), 1, l_fh) != 1)
-  {
-    fclose(l_fh);
-    return FILE_OPEN_ERROR;
-  }
-
-  l_hdr.tpd_ptr = l_table_descriptor;
-
-  cd_entry *l_cols = (cd_entry*)((char*)l_table_descriptor + l_table_descriptor->cd_offset);
-  int l_ncols = l_table_descriptor->num_columns;
-
-  int l_col_off[MAX_NUM_COL];
-  {
-    int off = 0;
-    for (int i = 0; i < l_ncols; i++)
-    {
-      l_col_off[i] = off;
-      off += 1;  /* LEN */
-      if (l_cols[i].col_type == T_INT)
-        off += (int)sizeof(int);
-      else
-        off += l_cols[i].col_len;
-    }
-  }
-
-   /* NATURAL JOIN  – no WHERE */
-  if (do_join)
-  {
-    table_file_header r_hdr;
-    FILE *r_fh = NULL;
-    char r_filename[MAX_IDENT_LEN + 5];
-
-    memset(r_filename, '\0', sizeof(r_filename));
-    snprintf(r_filename, sizeof(r_filename), "%s.tab", r_table_name);
-
-    if ((r_fh = fopen(r_filename, "rb")) == NULL)
-    {
-      fclose(l_fh);
-      return FILE_OPEN_ERROR;
-    }
-
-    if (fread(&r_hdr, sizeof(table_file_header), 1, r_fh) != 1)
-    {
-      fclose(l_fh); fclose(r_fh);
-      return FILE_OPEN_ERROR;
-    }
-    r_hdr.tpd_ptr = r_table_descriptor;
-
-    cd_entry *r_cols = (cd_entry*)((char*)r_table_descriptor + r_table_descriptor->cd_offset);
-    int r_ncols = r_table_descriptor->num_columns;
-
-    int r_col_off[MAX_NUM_COL];
-    {
-      int off = 0;
-      for (int i = 0; i < r_ncols; i++)
-      {
-        r_col_off[i] = off;
-        off += 1;
-        if (r_cols[i].col_type == T_INT)
-          off += (int)sizeof(int);
-        else
-          off += r_cols[i].col_len;
-      }
-    }
-
-    int l_join_idx[MAX_NUM_COL];
-    int r_join_idx[MAX_NUM_COL];
-    int J = 0;
-
-    for (int i = 0; i < l_ncols; i++)
-    {
-      for (int j = 0; j < r_ncols; j++)
-      {
-        if (strcmp(l_cols[i].col_name, r_cols[j].col_name) == 0)
-        {
-          if (l_cols[i].col_type != r_cols[j].col_type)
-          {
-            fclose(l_fh); fclose(r_fh);
-            return INVALID_STATEMENT;
-          }
-          if ((l_cols[i].col_type == T_CHAR) &&
-              (l_cols[i].col_len  != r_cols[j].col_len))
-          {
-            fclose(l_fh); fclose(r_fh);
-            return INVALID_STATEMENT;
-          }
-          l_join_idx[J] = i;
-          r_join_idx[J] = j;
-          J++;
+// Helper to get column info
+bool get_col_info(tpd_entry* tpd, const char* col_name, int& offset, int& type, int& len) {
+    if (!tpd) return false;
+    cd_entry* col_entry = (cd_entry*)((char*)tpd + tpd->cd_offset);
+    int curr_offset = 0;
+    for (int i = 0; i < tpd->num_columns; i++) {
+        if (strcasecmp(col_entry[i].col_name, col_name) == 0) {
+            offset = curr_offset;
+            type = col_entry[i].col_type;
+            len = col_entry[i].col_len;
+            return true;
         }
-      }
+        curr_offset += 1; // length byte
+        if (col_entry[i].col_type == T_INT) curr_offset += sizeof(int);
+        else curr_offset += col_entry[i].col_len;
     }
+    return false;
+}
 
-    printf("\n");
-    for (int i = 0; i < l_ncols; i++)
-    {
-      if (i > 0) printf(" | ");
-      printf("%s", l_cols[i].col_name);
+// Helper to get value
+bool get_value(const std::vector<unsigned char>& rec, int offset, int type, int& val_int, std::string& val_str, bool& is_null) {
+    if (offset >= rec.size()) return false;
+    unsigned char len = rec[offset];
+    is_null = (len == 0);
+    if (is_null) return true;
+
+    const unsigned char* data = rec.data() + offset + 1;
+    if (type == T_INT) {
+        memcpy(&val_int, data, sizeof(int));
+    } else {
+        val_str.assign((const char*)data, len);
     }
-    for (int j = 0; j < r_ncols; j++)
-    {
-      bool is_common = false;
-      for (int k = 0; k < J; k++)
-      {
-        if (r_join_idx[k] == j) { is_common = true; break; }
-      }
-      if (!is_common)
-        printf(" | %s", r_cols[j].col_name);
-    }
-    printf("\n");
+    return true;
+}
 
-    int total = 0;
-    for (int i = 0; i < l_ncols; i++)
-    {
-      if (i > 0) total += 3;
-      total += (int)strlen(l_cols[i].col_name);
-    }
-    for (int j = 0; j < r_ncols; j++)
-    {
-      bool is_common = false;
-      for (int k = 0; k < J; k++)
-      {
-        if (r_join_idx[k] == j) { is_common = true; break; }
-      }
-      if (!is_common)
-      {
-        total += 3;
-        total += (int)strlen(r_cols[j].col_name);
-      }
-    }
-    while (total-- > 0) printf("-");
-    printf("\n");
+int sem_select(token_list *t_list) {
+    int rc = 0;
+    token_list *cur_token = t_list;
+    tpd_entry *l_tpd = NULL;
+    tpd_entry *r_tpd = NULL;
+    char l_table_name[MAX_IDENT_LEN + 1] = {0};
+    char r_table_name[MAX_IDENT_LEN + 1] = {0};
+    bool do_join = false;
+    std::vector<SelectCondition> conditions;
+    OrderBy order_by = {{0}, false};
+    bool has_order_by = false;
+    
+    // Parse SELECT columns/aggregates
+    std::vector<std::string> select_cols;
+    std::vector<int> agg_funcs; // 0=none, F_SUM, F_AVG, F_COUNT
+    
+    // if (!cur_token || cur_token->tok_value != K_SELECT) return INVALID_STATEMENT;
+    // cur_token = cur_token->next;
+    // do_semantic already consumes K_SELECT
 
-    unsigned char *lrec = (unsigned char*)malloc(l_hdr.record_size);
-    unsigned char *rrec = (unsigned char*)malloc(r_hdr.record_size);
-    if (!lrec || !rrec)
-    {
-      if (lrec) free(lrec);
-      if (rrec) free(rrec);
-      fclose(l_fh); fclose(r_fh);
-      return MEMORY_ERROR;
-    }
 
-    int printed = 0;
 
-    for (int rl = 0; rl < l_hdr.num_records; rl++)
-    {
-      long lpos = l_hdr.record_offset + (long)rl * (long)l_hdr.record_size;
-      if (fseek(l_fh, lpos, SEEK_SET) != 0) { rc = FILE_OPEN_ERROR; break; }
-      if (fread(lrec, l_hdr.record_size, 1, l_fh) != 1) { rc = FILE_OPEN_ERROR; break; }
-
-      for (int rr = 0; rr < r_hdr.num_records; rr++)
-      {
-        long rpos = r_hdr.record_offset + (long)rr * (long)r_hdr.record_size;
-        if (fseek(r_fh, rpos, SEEK_SET) != 0) { rc = FILE_OPEN_ERROR; break; }
-        if (fread(rrec, r_hdr.record_size, 1, r_fh) != 1) { rc = FILE_OPEN_ERROR; break; }
-
-        bool join_match = true;
-        for (int k = 0; k < J; k++)
-        {
-          int il = l_join_idx[k];
-          int ir = r_join_idx[k];
-
-          unsigned char *pl = lrec + l_col_off[il];
-          unsigned char *pr = rrec + r_col_off[ir];
-          unsigned char lenL = *pl++;
-          unsigned char lenR = *pr++;
-
-          if (lenL == 0 || lenR == 0) { join_match = false; break; }
-
-          if (l_cols[il].col_type == T_INT)
-          {
-            int vL = 0, vR = 0;
-            memcpy(&vL, pl, sizeof(int));
-            memcpy(&vR, pr, sizeof(int));
-            if (vL != vR) { join_match = false; break; }
-          }
-          else
-          {
-            if (lenL != lenR) { join_match = false; break; }
-            if (memcmp(pl, pr, lenL) != 0) { join_match = false; break; }
-          }
-        }
-
-        if (!join_match)
-          continue;
-
-        printed++;
-
-        /* left columns */
-        for (int c = 0; c < l_ncols; c++)
-        {
-          if (c > 0) printf(" | ");
-          unsigned char *p = lrec + l_col_off[c];
-          unsigned char len = *p++;
-          if (l_cols[c].col_type == T_INT)
-          {
-            int v = 0; memcpy(&v, p, sizeof(int));
-            if (len == 0) printf("NULL"); else printf("%d", v);
-          }
-          else
-          {
-            if (len == 0) printf("NULL");
-            else
-            {
-              char tmp[1024]; int n = (len < (sizeof(tmp)-1)) ? len : (sizeof(tmp)-1);
-              memset(tmp, 0, sizeof(tmp));
-              memcpy(tmp, p, n);
-              printf("%s", tmp);
+    bool select_star = false;
+    if (cur_token && cur_token->tok_value == S_STAR) {
+        select_star = true;
+        cur_token = cur_token->next;
+    } else {
+        while (cur_token && cur_token->tok_value != K_FROM) {
+            int func = 0;
+            if (cur_token->tok_class == function_name) {
+                func = cur_token->tok_value;
+                cur_token = cur_token->next; // (
+                if (!cur_token || cur_token->tok_value != S_LEFT_PAREN) return INVALID_STATEMENT;
+                cur_token = cur_token->next; // col or *
             }
-          }
+            
+            if (cur_token->tok_value == S_STAR) {
+                 if (func != F_COUNT) return INVALID_STATEMENT;
+                 select_cols.push_back("*");
+            } else if (cur_token->tok_class == identifier) {
+                select_cols.push_back(cur_token->tok_string);
+            } else {
+                rc = INVALID_COLUMN_NAME;
+                cur_token->tok_value = INVALID;
+                return rc;
+            }
+            agg_funcs.push_back(func);
+            cur_token = cur_token->next;
+
+            if (func) {
+                if (!cur_token || cur_token->tok_value != S_RIGHT_PAREN) {
+                    rc = INVALID_STATEMENT;
+                    if (cur_token) cur_token->tok_value = INVALID;
+                    return rc;
+                }
+                cur_token = cur_token->next;
+            }
+            
+            if (cur_token->tok_value == S_COMMA) {
+                cur_token = cur_token->next;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (!select_star && select_cols.empty()) {
+        rc = INVALID_STATEMENT;
+        if (cur_token) cur_token->tok_value = INVALID;
+        return rc;
+    }
+
+    if (!cur_token || cur_token->tok_value != K_FROM) {
+        rc = INVALID_STATEMENT;
+        if (cur_token) cur_token->tok_value = INVALID;
+        return rc;
+    }
+    cur_token = cur_token->next;
+
+    // Parse Tables
+    if (!cur_token || cur_token->tok_class != identifier) {
+        rc = INVALID_TABLE_NAME;
+        if (cur_token) cur_token->tok_value = INVALID;
+        return rc;
+    }
+    strcpy(l_table_name, cur_token->tok_string);
+    l_tpd = get_tpd_from_list(l_table_name);
+    if (!l_tpd) {
+        rc = TABLE_NOT_EXIST;
+        if (cur_token) cur_token->tok_value = INVALID;
+        return rc;
+    }
+    cur_token = cur_token->next;
+
+    if (cur_token && cur_token->tok_value == K_NATURAL) {
+        cur_token = cur_token->next;
+        if (!cur_token || cur_token->tok_value != K_JOIN) {
+            rc = INVALID_STATEMENT;
+            if (cur_token) cur_token->tok_value = INVALID;
+            return rc;
+        }
+        cur_token = cur_token->next;
+        if (!cur_token || cur_token->tok_class != identifier) {
+            rc = INVALID_TABLE_NAME;
+            if (cur_token) cur_token->tok_value = INVALID;
+            return rc;
+        }
+        strcpy(r_table_name, cur_token->tok_string);
+        r_tpd = get_tpd_from_list(r_table_name);
+        if (!r_tpd) {
+            rc = TABLE_NOT_EXIST;
+            if (cur_token) cur_token->tok_value = INVALID;
+            return rc;
+        }
+        do_join = true;
+        cur_token = cur_token->next;
+    }
+
+    // Parse WHERE
+    if (cur_token && cur_token->tok_value == K_WHERE) {
+        cur_token = cur_token->next;
+        bool has_condition = false;
+        while (cur_token && cur_token->tok_value != K_ORDER && cur_token->tok_value != EOC) {
+            has_condition = true;
+            SelectCondition cond;
+            memset(&cond, 0, sizeof(cond));
+            
+            if (cur_token->tok_class != identifier) {
+                rc = INVALID_COLUMN_NAME;
+                cur_token->tok_value = INVALID;
+                return rc;
+            }
+            strcpy(cond.col_name, cur_token->tok_string);
+            cur_token = cur_token->next;
+
+            if (cur_token->tok_value == K_IS) {
+                cur_token = cur_token->next;
+                if (cur_token->tok_value == K_NOT) {
+                    cond.is_not_null_check = true;
+                    cur_token = cur_token->next;
+                } else {
+                    cond.is_null_check = true;
+                }
+                if (cur_token->tok_value != K_NULL) {
+                    rc = INVALID_STATEMENT;
+                    cur_token->tok_value = INVALID;
+                    return rc;
+                }
+                cur_token = cur_token->next;
+            } else {
+                if (cur_token->tok_value != S_EQUAL && cur_token->tok_value != S_LESS && cur_token->tok_value != S_GREATER) {
+                    rc = INVALID_STATEMENT;
+                    cur_token->tok_value = INVALID;
+                    return rc;
+                }
+                cond.rel_op = cur_token->tok_value;
+                cur_token = cur_token->next;
+
+                if (cur_token->tok_value == INT_LITERAL) {
+                    cond.val_type = T_INT;
+                    cond.int_val = atoi(cur_token->tok_string);
+                } else if (cur_token->tok_value == STRING_LITERAL) {
+                    cond.val_type = T_CHAR;
+                    strcpy(cond.str_val, cur_token->tok_string);
+                } else if (cur_token->tok_value == K_NULL) {
+                     // Only = NULL allowed here if not using IS NULL syntax, but standard SQL uses IS NULL.
+                     // The parser in sem_delete allowed = NULL. Let's support it.
+                     if (cond.rel_op != S_EQUAL) return INVALID_STATEMENT;
+                     cond.is_null_check = true;
+                } else {
+                    rc = INVALID_STATEMENT;
+                    cur_token->tok_value = INVALID;
+                    return rc;
+                }
+                cur_token = cur_token->next;
+            }
+
+            if (cur_token && (cur_token->tok_value == K_AND || cur_token->tok_value == K_OR)) {
+                cond.logic_op = cur_token->tok_value;
+                cur_token = cur_token->next;
+            }
+            conditions.push_back(cond);
+        }
+        if (!has_condition) {
+            rc = INVALID_STATEMENT;
+            if (cur_token) cur_token->tok_value = INVALID;
+            return rc;
+        }
+    }
+
+    // Parse ORDER BY
+    if (cur_token && cur_token->tok_value == K_ORDER) {
+        cur_token = cur_token->next;
+        if (!cur_token || cur_token->tok_value != K_BY) {
+            rc = INVALID_STATEMENT;
+            if (cur_token) cur_token->tok_value = INVALID;
+            return rc;
+        }
+        cur_token = cur_token->next;
+        if (!cur_token || cur_token->tok_class != identifier) {
+            rc = INVALID_COLUMN_NAME;
+            if (cur_token) cur_token->tok_value = INVALID;
+            return rc;
+        }
+        strcpy(order_by.col_name, cur_token->tok_string);
+        has_order_by = true;
+        cur_token = cur_token->next;
+        if (cur_token && cur_token->tok_value == K_DESC) {
+            order_by.desc = true;
+            cur_token = cur_token->next;
+        }
+    }
+
+    if (cur_token && cur_token->tok_value != EOC) {
+        rc = INVALID_STATEMENT;
+        cur_token->tok_value = INVALID;
+        return rc;
+    }
+
+    // Execution
+    std::vector<ResultRow> results;
+    
+    // Load Left Table
+    char filename[MAX_IDENT_LEN + 5];
+    snprintf(filename, sizeof(filename), "%s.tab", l_table_name);
+    FILE *f = fopen(filename, "rb");
+    if (!f) return FILE_OPEN_ERROR;
+    
+    table_file_header l_hdr;
+    fread(&l_hdr, sizeof(l_hdr), 1, f);
+    
+    std::vector<unsigned char> l_data(l_hdr.num_records * l_hdr.record_size);
+    fseek(f, l_hdr.record_offset, SEEK_SET);
+    fread(l_data.data(), l_hdr.record_size, l_hdr.num_records, f);
+    fclose(f);
+
+    if (do_join) {
+        snprintf(filename, sizeof(filename), "%s.tab", r_table_name);
+        f = fopen(filename, "rb");
+        if (!f) return FILE_OPEN_ERROR;
+        table_file_header r_hdr;
+        fread(&r_hdr, sizeof(r_hdr), 1, f);
+        std::vector<unsigned char> r_data(r_hdr.num_records * r_hdr.record_size);
+        fseek(f, r_hdr.record_offset, SEEK_SET);
+        fread(r_data.data(), r_hdr.record_size, r_hdr.num_records, f);
+        fclose(f);
+
+        // Identify common columns
+        std::vector<std::pair<int, int>> common_cols; // l_offset, r_offset
+        cd_entry* l_cols = (cd_entry*)((char*)l_tpd + l_tpd->cd_offset);
+        cd_entry* r_cols = (cd_entry*)((char*)r_tpd + r_tpd->cd_offset);
+        
+        int l_off = 0;
+        for(int i=0; i<l_tpd->num_columns; ++i) {
+            int r_off = 0;
+            for(int j=0; j<r_tpd->num_columns; ++j) {
+                if (strcasecmp(l_cols[i].col_name, r_cols[j].col_name) == 0) {
+                    common_cols.push_back({l_off, r_off});
+                    break;
+                }
+                r_off += 1 + (r_cols[j].col_type == T_INT ? 4 : r_cols[j].col_len);
+            }
+            l_off += 1 + (l_cols[i].col_type == T_INT ? 4 : l_cols[i].col_len);
         }
 
-        /* right non-join columns */
-        for (int c = 0; c < r_ncols; c++)
-        {
-          bool is_common = false;
-          for (int k = 0; k < J; k++)
-            if (r_join_idx[k] == c) { is_common = true; break; }
-          if (is_common) continue;
-
-          printf(" | ");
-          unsigned char *p = rrec + r_col_off[c];
-          unsigned char len = *p++;
-          if (r_cols[c].col_type == T_INT)
-          {
-            int v = 0; memcpy(&v, p, sizeof(int));
-            if (len == 0) printf("NULL"); else printf("%d", v);
-          }
-          else
-          {
-            if (len == 0) printf("NULL");
-            else
-            {
-              char tmp[1024]; int n = (len < (sizeof(tmp)-1)) ? len : (sizeof(tmp)-1);
-              memset(tmp, 0, sizeof(tmp));
-              memcpy(tmp, p, n);
-              printf("%s", tmp);
+        // Nested Loop Join
+        for(int i=0; i<l_hdr.num_records; ++i) {
+            for(int j=0; j<r_hdr.num_records; ++j) {
+                unsigned char* l_ptr = l_data.data() + i * l_hdr.record_size;
+                unsigned char* r_ptr = r_data.data() + j * r_hdr.record_size;
+                
+                bool match = true;
+                for(auto& p : common_cols) {
+                    unsigned char* lp = l_ptr + p.first;
+                    unsigned char* rp = r_ptr + p.second;
+                    if (*lp != *rp) { match = false; break; } // Length mismatch
+                    if (*lp == 0) { match = false; break; } // NULL never matches
+                    if (memcmp(lp+1, rp+1, *lp) != 0) { match = false; break; }
+                }
+                
+                if (match) {
+                    ResultRow row;
+                    row.l_rec.assign(l_ptr, l_ptr + l_hdr.record_size);
+                    row.r_rec.assign(r_ptr, r_ptr + r_hdr.record_size);
+                    results.push_back(row);
+                }
             }
-          }
+        }
+    } else {
+        for(int i=0; i<l_hdr.num_records; ++i) {
+            ResultRow row;
+            unsigned char* ptr = l_data.data() + i * l_hdr.record_size;
+            row.l_rec.assign(ptr, ptr + l_hdr.record_size);
+            results.push_back(row);
+        }
+    }
+
+    // Apply WHERE
+    std::vector<ResultRow> filtered_results;
+    for(auto& row : results) {
+        bool keep = true;
+        if (!conditions.empty()) {
+            bool current_res = true;
+            int last_op = 0; // 0=start, K_AND, K_OR
+
+            for(size_t k=0; k<conditions.size(); ++k) {
+                auto& cond = conditions[k];
+                bool cond_true = false;
+                
+                // Find column
+                int offset, type, len;
+                bool found = get_col_info(l_tpd, cond.col_name, offset, type, len);
+                bool is_null = false;
+                int val_int = 0;
+                std::string val_str;
+                
+                if (found) {
+                    get_value(row.l_rec, offset, type, val_int, val_str, is_null);
+                } else if (do_join) {
+                    found = get_col_info(r_tpd, cond.col_name, offset, type, len);
+                    if (found) get_value(row.r_rec, offset, type, val_int, val_str, is_null);
+                }
+                
+                if (!found) return INVALID_COLUMN_NAME;
+
+                if (cond.is_null_check) cond_true = is_null;
+                else if (cond.is_not_null_check) cond_true = !is_null;
+                else if (is_null) cond_true = false; // Any op with NULL is false
+                else {
+                    if (type == T_INT) {
+                        if (cond.val_type != T_INT) return INVALID_STATEMENT; // Type mismatch
+                        if (cond.rel_op == S_EQUAL) cond_true = (val_int == cond.int_val);
+                        else if (cond.rel_op == S_LESS) cond_true = (val_int < cond.int_val);
+                        else if (cond.rel_op == S_GREATER) cond_true = (val_int > cond.int_val);
+                    } else {
+                        if (cond.val_type != T_CHAR) return INVALID_STATEMENT;
+                        int cmp = strcmp(val_str.c_str(), cond.str_val);
+                        if (cond.rel_op == S_EQUAL) cond_true = (cmp == 0);
+                        else if (cond.rel_op == S_LESS) cond_true = (cmp < 0);
+                        else if (cond.rel_op == S_GREATER) cond_true = (cmp > 0);
+                    }
+                }
+
+                if (k == 0) current_res = cond_true;
+                else {
+                    if (last_op == K_AND) current_res = current_res && cond_true;
+                    else if (last_op == K_OR) current_res = current_res || cond_true;
+                }
+                last_op = cond.logic_op;
+            }
+            keep = current_res;
+        }
+        if (keep) filtered_results.push_back(row);
+    }
+    results = filtered_results;
+
+    // Apply ORDER BY
+    if (has_order_by) {
+        int offset, type, len;
+        bool found = get_col_info(l_tpd, order_by.col_name, offset, type, len);
+        bool in_left = found;
+        if (!found && do_join) {
+            found = get_col_info(r_tpd, order_by.col_name, offset, type, len);
+        }
+        if (!found) return INVALID_COLUMN_NAME;
+
+        std::sort(results.begin(), results.end(), [&](const ResultRow& a, const ResultRow& b) {
+            int val_a_int, val_b_int;
+            std::string val_a_str, val_b_str;
+            bool null_a, null_b;
+            
+            if (in_left) {
+                get_value(a.l_rec, offset, type, val_a_int, val_a_str, null_a);
+                get_value(b.l_rec, offset, type, val_b_int, val_b_str, null_b);
+            } else {
+                get_value(a.r_rec, offset, type, val_a_int, val_a_str, null_a);
+                get_value(b.r_rec, offset, type, val_b_int, val_b_str, null_b);
+            }
+
+            if (null_a && null_b) return false;
+            if (null_a) return !order_by.desc; // NULLs first/last? Usually first ASC.
+            if (null_b) return order_by.desc;
+
+            bool less = false;
+            if (type == T_INT) less = val_a_int < val_b_int;
+            else less = val_a_str < val_b_str;
+
+            return less;
+        });
+        
+        if (order_by.desc) {
+             std::reverse(results.begin(), results.end());
+        }
+    }
+
+    // Aggregates or Print
+    if (!agg_funcs.empty() && agg_funcs[0] != 0) {
+        // Aggregates
+        long long sum = 0;
+        double avg = 0;
+        int count = 0;
+        bool has_data = false;
+        
+        // Assuming single aggregate for now as per tests (or multiple simple ones)
+        // The tests check SELECT SUM(A), AVG(B) ...
+        // We need to print headers then values.
+        
+        printf("\n");
+        for(size_t i=0; i<select_cols.size(); ++i) {
+            if (i > 0) printf(" | ");
+            if (agg_funcs[i] == F_SUM) printf("SUM(%s)", select_cols[i].c_str());
+            else if (agg_funcs[i] == F_AVG) printf("AVG(%s)", select_cols[i].c_str());
+            else if (agg_funcs[i] == F_COUNT) printf("COUNT(%s)", select_cols[i].c_str());
         }
         printf("\n");
-      }
-      if (rc) break;
+        for(size_t i=0; i<select_cols.size(); ++i) {
+             if (i > 0) printf("---");
+             printf("----------");
+        }
+        printf("\n");
+
+        // Calculate
+        std::vector<std::string> results_str;
+        for(size_t k=0; k<select_cols.size(); ++k) {
+            int func = agg_funcs[k];
+            std::string col = select_cols[k];
+            
+            if (func == F_COUNT && col == "*") {
+                results_str.push_back(std::to_string(results.size()));
+                continue;
+            }
+
+            int offset, type, len;
+            bool found = get_col_info(l_tpd, col.c_str(), offset, type, len);
+            bool in_left = found;
+            if (!found && do_join) found = get_col_info(r_tpd, col.c_str(), offset, type, len);
+            
+            if (!found) return INVALID_COLUMN_NAME;
+
+            long long col_sum = 0;
+            int col_count = 0;
+            
+            for(auto& row : results) {
+                int val_int; std::string val_str; bool is_null;
+                if (in_left) get_value(row.l_rec, offset, type, val_int, val_str, is_null);
+                else get_value(row.r_rec, offset, type, val_int, val_str, is_null);
+                
+                if (!is_null) {
+                    if (type == T_INT) col_sum += val_int;
+                    col_count++;
+                }
+            }
+            
+            if (func == F_COUNT) results_str.push_back(std::to_string(col_count));
+            else if (func == F_SUM) results_str.push_back(std::to_string(col_sum));
+            else if (func == F_AVG) {
+                if (col_count == 0) results_str.push_back("0.00");
+                else results_str.push_back(std::to_string((double)col_sum / col_count));
+            }
+        }
+        
+        for(size_t i=0; i<results_str.size(); ++i) {
+            if (i > 0) printf(" | ");
+            printf("%s", results_str[i].c_str());
+        }
+        printf("\n");
+
+    } else {
+        // Print Rows
+        // Headers
+        printf("\n");
+        if (select_star) {
+            // Print all L cols then R unique cols
+            cd_entry* l_cols = (cd_entry*)((char*)l_tpd + l_tpd->cd_offset);
+            for(int i=0; i<l_tpd->num_columns; ++i) {
+                if (i > 0) printf(" | ");
+                printf("%s", l_cols[i].col_name);
+            }
+            if (do_join) {
+                cd_entry* r_cols = (cd_entry*)((char*)r_tpd + r_tpd->cd_offset);
+                for(int i=0; i<r_tpd->num_columns; ++i) {
+                    bool common = false;
+                    for(int j=0; j<l_tpd->num_columns; ++j) {
+                        if (strcasecmp(l_cols[j].col_name, r_cols[i].col_name) == 0) { common = true; break; }
+                    }
+                    if (!common) printf(" | %s", r_cols[i].col_name);
+                }
+            }
+        } else {
+            for(size_t i=0; i<select_cols.size(); ++i) {
+                if (i > 0) printf(" | ");
+                printf("%s", select_cols[i].c_str());
+            }
+        }
+        printf("\n");
+        // Separator
+        printf("--------------------------------------------------\n");
+
+        if (results.empty()) {
+            printf("(0 rows)\n");
+        } else {
+            for(auto& row : results) {
+                if (select_star) {
+                    // Print all L cols
+                    int l_off = 0;
+                    cd_entry* l_cols = (cd_entry*)((char*)l_tpd + l_tpd->cd_offset);
+                    for(int i=0; i<l_tpd->num_columns; ++i) {
+                        if (i > 0) printf(" | ");
+                        int val_int; std::string val_str; bool is_null;
+                        get_value(row.l_rec, l_off, l_cols[i].col_type, val_int, val_str, is_null);
+                        if (is_null) printf("NULL");
+                        else if (l_cols[i].col_type == T_INT) printf("%d", val_int);
+                        else printf("%s", val_str.c_str());
+                        
+                        l_off += 1 + (l_cols[i].col_type == T_INT ? 4 : l_cols[i].col_len);
+                    }
+                    if (do_join) {
+                        int r_off = 0;
+                        cd_entry* r_cols = (cd_entry*)((char*)r_tpd + r_tpd->cd_offset);
+                        for(int i=0; i<r_tpd->num_columns; ++i) {
+                            bool common = false;
+                            for(int j=0; j<l_tpd->num_columns; ++j) {
+                                if (strcasecmp(l_cols[j].col_name, r_cols[i].col_name) == 0) { common = true; break; }
+                            }
+                            if (!common) {
+                                printf(" | ");
+                                int val_int; std::string val_str; bool is_null;
+                                get_value(row.r_rec, r_off, r_cols[i].col_type, val_int, val_str, is_null);
+                                if (is_null) printf("NULL");
+                                else if (r_cols[i].col_type == T_INT) printf("%d", val_int);
+                                else printf("%s", val_str.c_str());
+                            }
+                            r_off += 1 + (r_cols[i].col_type == T_INT ? 4 : r_cols[i].col_len);
+                        }
+                    }
+                } else {
+                    for(size_t i=0; i<select_cols.size(); ++i) {
+                         if (i > 0) printf(" | ");
+                         int offset, type, len;
+                         bool found = get_col_info(l_tpd, select_cols[i].c_str(), offset, type, len);
+                         bool in_left = found;
+                         if (!found && do_join) found = get_col_info(r_tpd, select_cols[i].c_str(), offset, type, len);
+                         
+                         if (found) {
+                             int val_int; std::string val_str; bool is_null;
+                             if (in_left) get_value(row.l_rec, offset, type, val_int, val_str, is_null);
+                             else get_value(row.r_rec, offset, type, val_int, val_str, is_null);
+                             if (is_null) printf("NULL");
+                             else if (type == T_INT) printf("%d", val_int);
+                             else printf("%s", val_str.c_str());
+                         }
+                    }
+                }
+                printf("\n");
+            }
+        }
     }
 
-    if (!rc && (printed == 0))
-      printf("(0 rows)\n");
-
-    free(lrec); free(rrec);
-    fclose(l_fh); fclose(r_fh);
     return rc;
-  }
-
-
-  printf("\n");
-  for (int i = 0; i < l_ncols; i++)
-  {
-    if (i > 0) printf(" | ");
-    printf("%s", l_cols[i].col_name);
-  }
-  printf("\n");
-
-  int total = 0;
-  for (int i = 0; i < l_ncols; i++)
-  {
-    if (i > 0) total += 3;
-    total += (int)strlen(l_cols[i].col_name);
-  }
-  while (total-- > 0) printf("-");
-  printf("\n");
-
-  if (l_hdr.num_records == 0)
-  {
-    printf("(0 rows)\n");
-    fclose(l_fh);
-    return rc;
-  }
-
-  unsigned char *rec = (unsigned char*)malloc(l_hdr.record_size);
-  if (!rec)
-  {
-    fclose(l_fh);
-    return MEMORY_ERROR;
-  }
-
-  int match_count = 0;
-
-  for (int r = 0; r < l_hdr.num_records; r++)
-  {
-    long pos = l_hdr.record_offset + (long)r * (long)l_hdr.record_size;
-    if (fseek(l_fh, pos, SEEK_SET) != 0)
-    {
-      rc = FILE_OPEN_ERROR;
-      break;
-    }
-    if (fread(rec, l_hdr.record_size, 1, l_fh) != 1)
-    {
-      rc = FILE_OPEN_ERROR;
-      break;
-    }
-
-    bool match = false;
-
-    if (!has_where)
-    {
-      match = true;
-    }
-    else
-    {
-      cd_entry *wcol = &l_cols[where_col_index];
-      unsigned char *p = rec + l_col_off[where_col_index];
-      unsigned char len = *p++;
-
-      if (where_is_null)
-      {
-        match = (len == 0);
-      }
-      else if (where_is_int)
-      {
-        if (wcol->col_type != T_INT || len == 0)
-        {
-          match = false;
-        }
-        else
-        {
-          int row_val = 0;
-          memcpy(&row_val, p, sizeof(int));
-
-          if (where_rel_op == S_EQUAL)
-            match = (row_val == where_int_value);
-          else if (where_rel_op == S_GREATER)
-            match = (row_val >  where_int_value);
-          else if (where_rel_op == S_LESS)
-            match = (row_val <  where_int_value);
-        }
-      }
-      else if (where_is_string)
-      {
-        if (wcol->col_type != T_CHAR || len == 0)
-        {
-          match = false;
-        }
-        else
-        {
-          char row_str[MAX_TOK_LEN];
-          int copy_len = (len < (MAX_TOK_LEN-1)) ? len : (MAX_TOK_LEN-1);
-          memset(row_str, 0, sizeof(row_str));
-          memcpy(row_str, p, copy_len);
-
-          int cmp = strncmp(row_str, where_str_value,
-                            (where_str_len < copy_len ? where_str_len : copy_len));
-          if (cmp == 0)
-          {
-            if (copy_len == where_str_len)
-              cmp = 0;
-            else if (copy_len > where_str_len)
-              cmp = 1;
-            else
-              cmp = -1;
-          }
-
-          if (where_rel_op == S_EQUAL)
-            match = (cmp == 0);
-          else if (where_rel_op == S_GREATER)
-            match = (cmp > 0);
-          else if (where_rel_op == S_LESS)
-            match = (cmp < 0);
-        }
-      }
-    }
-
-    if (!match)
-      continue;
-
-    match_count++;
-
-    for (int c = 0; c < l_ncols; c++)
-    {
-      if (c > 0) printf(" | ");
-      unsigned char *p = rec + l_col_off[c];
-      unsigned char len = *p++;
-      if (l_cols[c].col_type == T_INT)
-      {
-        int v = 0; memcpy(&v, p, sizeof(int));
-        if (len == 0) printf("NULL"); else printf("%d", v);
-      }
-      else
-      {
-        if (len == 0) printf("NULL");
-        else
-        {
-          char tmp[1024]; int n = (len < (sizeof(tmp)-1)) ? len : (sizeof(tmp)-1);
-          memset(tmp, 0, sizeof(tmp));
-          memcpy(tmp, p, n);
-          printf("%s", tmp);
-        }
-      }
-    }
-    printf("\n");
-  }
-
-  if ((rc == 0) && (match_count == 0))
-    printf("Warning: no rows selected.\n");
-
-  free(rec);
-  fclose(l_fh);
-
-  return rc;
 }
 
 
