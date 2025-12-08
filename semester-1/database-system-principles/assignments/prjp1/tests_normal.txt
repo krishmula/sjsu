@@ -1,0 +1,52 @@
+./db "create table class(Student_Name char(20) NOT NULL, Gender char(1), Exams int, Quiz_Total int, Total int NOT NULL)"
+
+./db "insert into class values('Grace','F',3,380,420)"
+./db "insert into class values('Adam','M',3,400,450)"
+./db "insert into class values('Eve','F',2,40,80)"
+./db "insert into class values('Niaj',NULL,NULL,NULL,210)"
+./db "insert into class values('Bad_Student','M',2,150,180)"
+./db "insert into class values('Charlie','M',1,50,90)"
+./db "insert into class values('Heidi','F',3,360,410)"
+./db "insert into class values('Ivan','M',3,370,430)"
+./db "insert into class values('David','M',3,320,330)"
+./db "insert into class values('Mallory',NULL,1,NULL,200)"
+./db "insert into class values('Olivia','F',NULL,NULL,230)"
+./db "insert into class values('Frank','M',2,60,70)"
+./db "insert into class values('Judy','F',2,200,220)"
+./db "insert into class values('Good_Student','F',3,300,340)"
+./db "insert into class values('Peggy','F',2,250,260)"
+
+
+./db "select * from class"
+./db "select Student_Name from class" ## Fix
+./db "select Student_Name, Total from class" ## Fix
+
+
+./db "delete from class where Student_Name = 'Bad_Student'"
+./db "delete from class where Student_Name = 'Nobody'"
+./db "delete from class where Total < 100"
+
+
+./db "update class set Quiz_Total = 350 where Student_Name = 'David'" ## Fix
+./db "update class set Quiz_Total = 200 where Student_Name = 'Nobody'" ## Fix
+./db "update class set Quiz_Total = 350 where Quiz_Total > 350" ## Fix
+
+
+./db "select * from class where Total >= 200" ## FIX
+./db "select * from class where Student_Name < 'Good_Student'"
+./db "select * from class where Quiz_Total is null" ## FIX
+./db "select * from class where Quiz_Total is not null" ## FIX
+./db "select * from class where Gender = 'F' and Total >= 220" ## FIX
+./db "select * from class where Gender = 'F' or Total >= 430" ## FIX
+./db "select Student_Name, Total from class order by Total" ## FIX
+./db "select Student_Name, Total from class where Gender = 'F' order by Total" ## FIX
+
+
+./db "select sum(Total) from class" ## FIX
+./db "select sum(Total) from class where Gender = 'F'" ## FIX
+./db "select avg(Total) from class" ## FIX
+./db "select avg(Total) from class where Gender = 'M'" ## FIX
+./db "select count(*) from class" ## FIX
+./db "select count(*) from class where Quiz_Total is not null" ## FIX
+./db "select sum(Quiz_Total), avg(Quiz_Total) from class" ## FIX
+./db "select count(*), count(Quiz_Total) from class" ## FIX

@@ -1,0 +1,1 @@
+- Use the null indicator variable to check that the string is not null before we print out the content.

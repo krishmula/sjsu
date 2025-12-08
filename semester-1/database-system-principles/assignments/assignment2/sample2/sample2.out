@@ -1,0 +1,50 @@
+[db2inst1@92a7b62a44b1 157b]$ gcc -I../sqllib/include -c sample2.c
+[db2inst1@92a7b62a44b1 157b]$ gcc -o sample2 sample2.o -L../sqllib/lib  -ldb2
+[db2inst1@92a7b62a44b1 157b]$ ./sample2 sample
+
+THIS SAMPLE SHOWS HOW TO GET INFORMATION AT THE TABLE LEVEL.
+
+  Connecting to 'sample' database...
+  Connected to 'sample' database.
+
+-----------------------------------------------------------
+USE THE SQL STATEMENT:
+  SELECT INTO
+TO GET A TABLE SCHEMA NAME.
+
+  Execute the statement
+    SELECT tabschema INTO :schemaName
+      FROM syscat.tables
+      WHERE tabname = :tableName
+  for
+    tableName = 'EMPLOYEE'.
+
+  Table schema name is: DB2INST1
+
+-----------------------------------------------------------
+USE THE SQL STATEMENTS:
+  DECLARE CURSOR
+  OPEN
+  FETCH
+  CLOSE
+TO GET TABLE COLUMN INFO.
+
+  Get info for 'DB2INST1.EMPLOYEE' table columns:
+
+    column name          data type      data size
+    -------------------- -------------- ----------
+    BIRTHDATE            DATE           4
+    BONUS                DECIMAL        9,2
+    COMM                 DECIMAL        9,2
+    EDLEVEL              SMALLINT       2
+    EMPNO                CHARACTER      6
+    FIRSTNME             VARCHAR        12
+    HIREDATE             DATE           4
+    JOB                  CHARACTER      8
+    LASTNAME             VARCHAR        15
+    MIDINIT              CHARACTER      1
+    PHONENO              CHARACTER      4
+    SALARY               DECIMAL        9,2
+    SEX                  CHARACTER      1
+    WORKDEPT             CHARACTER      3
+[db2inst1@92a7b62a44b1 157b]$ 

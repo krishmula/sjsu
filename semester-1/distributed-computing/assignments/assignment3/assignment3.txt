@@ -1,0 +1,25 @@
+1. Process Failure Detectors 
+Is it possible to implement either a reliable or an unreliable process failure detector using an unreliable communication channel? Explain your answer.
+Ans.
+
+2. DNS Navigation
+a) Why might a DNS client choose recursive navigation rather than iterative navigation?
+b) What is the relevance of the recursive navigation option to concurrency within a name server?
+Ans.
+
+3. Name Service
+How does caching help improve a name service’s availability?
+Ans.
+
+4. Chord Peer-to-Peer System 
+Consider the Chord peer-to-peer system where identifiers are 8-bit numbers (0–255). The system currently has nodes with the following identifiers:
+9, 10, 20, 24, 90, 105, 245.
+a) List all the fingers at node 9. (Show work.)
+b) Suppose node 9 needs to locate the node responsible for the key with identifier 242. Show how the request will be forwarded step by step until it reaches the correct node.
+Ans.
+
+
+5. Chord Key Placement
+In the Chord network above, determine which node is responsible for storing each of the following keys:
+9, 10, 11, 29, 248, 255.
+Ans.

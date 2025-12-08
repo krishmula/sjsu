@@ -1,0 +1,152 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlenv.h>
+#include <sqlca.h>
+
+/*-- We are declaring the shared variables here. ---*/
+EXEC SQL BEGIN DECLARE SECTION;
+/* -- Common connection variables -------------------------------- */
+  char dbAlias[15];
+
+/* -- Part-1 Department variables -------------------------------------- */
+  char p1_deptno[4];
+  char p1_deptname[37];
+  char p1_mgrno[7];
+  char p1_admrdept[4];
+  char p1_location[17];
+
+/* -- Part-2 Employee variables -------------------------------------- */
+  char p2_firstnme[13];
+  char p2_lastname[16];
+  char p2_midinit[2];
+  char p2_sex[2];
+  double p2_bonus;
+  double p2_comm;
+  double p2_salary;
+
+/* -- Part-3 Employee join Department variables -------------------------------------- */
+  char p3_firstnme[13];
+  char p3_lastname[16];
+  char p3_deptno[4];
+  char p3_deptname[37];
+  char p3_mgrno[7];
+EXEC SQL END DECLARE SECTION;
+
+/* ---- Part 1 --------------------------------------------------- */
+static void showDepartmentTable(void)
+{
+  struct sqlca sqlca;
+  int rowCount = 0;
+
+  printf("\n-----------------------------------------------------------\n");
+  printf("Part 1: DISPLAY EMPLOYEE TABLE\n");
+  printf("-----------------------------------------------------------\n\n");
+  printf("%-6s %-36s %-6s %-8s %-16s\n","DEPTNO","DEPTNAME","MGRNO","ADMRDEPT","LOCATION");
+  printf("------ ------------------------------------ ------ -------- ----------------\n");
+
+  EXEC SQL DECLARE deptCur CURSOR FOR
+    SELECT deptno, CHAR(deptname, 36), mgrno, admrdept, CHAR(location, 16)
+    FROM   department
+    ORDER  BY deptno;
+
+  EXEC SQL OPEN deptCur;                     
+  while (1) {
+    EXEC SQL FETCH deptCur INTO :p1_deptno, :p1_deptname, :p1_mgrno, :p1_admrdept, :p1_location;
+    if (sqlca.sqlcode == 100) break;
+    printf("%-6s %-36s %-6s %-8s %-16s\n", p1_deptno, p1_deptname, p1_mgrno, p1_admrdept, p1_location);
+    rowCount++;
+  }
+  EXEC SQL CLOSE deptCur;                    
+  printf("\n%d row(s) selected.\n\n", rowCount);
+}
+
+/* ---- Part 2 --------------------------------------------------- */
+static void showEmployeeTable(void)
+{
+  struct sqlca sqlca;
+  int rowCount = 0;
+
+  printf("\n-----------------------------------------------------------\n");
+  printf("Part 2: DISPLAY EMPLOYEE TABLE\n");
+  printf("-----------------------------------------------------------\n\n");
+  printf("%-12s %-15s %-7s %-3s %-11s %-11s %-11s\n","FIRSTNME","LASTNAME","MIDINIT","SEX","BONUS","COMM","SALARY");
+  printf("------------ --------------- ------- --- ----------- ----------- -----------\n");
+
+  EXEC SQL DECLARE empCur CURSOR FOR
+    SELECT firstnme, lastname, midinit, sex, bonus, comm, salary
+    FROM   employee
+    ORDER  BY lastname, firstnme;
+
+  EXEC SQL OPEN empCur;
+  while (1) {
+   EXEC SQL FETCH empCur INTO :p2_firstnme, :p2_lastname, :p2_midinit, :p2_sex, :p2_bonus, :p2_comm, :p2_salary;
+   if (sqlca.sqlcode == 100) break;
+    printf("%-12.12s %-15.15s %-8.1s %-3.3s %9.2f %10.2f %9.2f\n", p2_firstnme, p2_lastname, p2_midinit, p2_sex, p2_bonus, p2_comm, p2_salary);
+    rowCount++;
+  }
+  EXEC SQL CLOSE empCur;                     
+  printf("\n%d row(s) selected.\n\n", rowCount);
+
+}
+
+/* ---- Part 3 --------------------------------------------------- */
+static void showJoin(void)
+{
+  struct sqlca sqlca;
+  int rowCount = 0;
+
+  printf("\n-----------------------------------------------------------\n");
+  printf("Part 3: DISPLAY JOINED EMPLOYEE AND DEPARTMENT DATA\n");
+  printf("-----------------------------------------------------------\n\n");
+  printf("%-12s %-15s %-6s %-36s %-6s\n","FIRSTNME","LASTNAME","DEPTNO","DEPTNAME","MGRNO");
+  printf("------------ --------------- ------ ------------------------------------ ------\n");
+
+  EXEC SQL DECLARE joinCur CURSOR FOR
+    SELECT e.firstnme, e.lastname,
+           d.deptno, d.deptname, d.mgrno
+    FROM   employee  e
+    JOIN   department d
+           ON e.workdept = d.deptno
+    ORDER  BY e.lastname, e.firstnme;
+
+  EXEC SQL OPEN joinCur;                     
+  while (1) {
+    EXEC SQL FETCH joinCur INTO :p3_firstnme, :p3_lastname, :p3_deptno, :p3_deptname, :p3_mgrno;
+    if (sqlca.sqlcode == 100) break;
+    printf("%-12s %-15s %-11s %-30s %-14s\n", p3_firstnme, p3_lastname, p3_deptno, p3_deptname, p3_mgrno);
+    rowCount++;
+  }
+  EXEC SQL CLOSE joinCur;                    
+  printf("\n%d row(s) selected.\n\n", rowCount);
+}
+
+/* ---- main ----------------------------------------------------- */
+int main(int argc, char *argv[])
+{
+  int rc = 0;
+  struct sqlca sqlca;
+
+  if (argc < 2)
+  {
+    printf("Usage sample2 dbAlias");
+  }
+  else
+  {
+    strcpy(dbAlias, argv[1]);
+
+    printf("\nTHIS SAMPLE SHOWS HOW TO GET INFORMATION AT THE TABLE LEVEL.\n");
+
+    /* connect to the database */
+    printf("\n  Connecting to '%s' database...\n", dbAlias);
+    EXEC SQL CONNECT TO :dbAlias;
+    printf("  Connected to '%s' database.\n", dbAlias);
+
+    showDepartmentTable();
+    showEmployeeTable();
+    showJoin();
+
+    EXEC SQL CONNECT RESET;
+  }
+    return 0;
+} 
