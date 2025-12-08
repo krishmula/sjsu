@@ -58,7 +58,7 @@ echo "##########################################################################
 # Compile the program first
 echo ""
 echo "Compiling the program..."
-gcc -g -o db db.cpp -lstdc++
+gcc -g -o db db.cpp
 if [ $? -ne 0 ]; then
     echo -e "${RED}COMPILATION FAILED!${NC}"
     exit 1

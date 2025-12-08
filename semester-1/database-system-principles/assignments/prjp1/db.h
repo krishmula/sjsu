@@ -5,7 +5,6 @@ db.h - This file contains all the structures, defines, and function
 
 #include <cstdio>
 #include <stdint.h>
-#include <vector>
 
 #define MAX_IDENT_LEN 16
 #define MAX_NUM_COL 16
@@ -127,8 +126,10 @@ struct OrderBy {
 };
 
 struct ResultRow {
-    std::vector<unsigned char> l_rec;
-    std::vector<unsigned char> r_rec;
+    unsigned char* l_rec;
+    int l_rec_size;
+    unsigned char* r_rec;
+    int r_rec_size;
 };
 
 /* This enum defines the different classes of tokens for

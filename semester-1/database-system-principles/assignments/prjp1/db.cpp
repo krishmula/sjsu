@@ -10,10 +10,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <vector>
-#include <algorithm>
-#include <string>
-#include <iostream>
 
 #if defined(_WIN32) || defined(_WIN64)
 #define strcasecmp _stricmp
@@ -1984,20 +1980,24 @@ bool get_col_info(tpd_entry* tpd, const char* col_name, int& offset, int& type, 
 }
 
 // Helper to get value
-bool get_value(const std::vector<unsigned char>& rec, int offset, int type, int& val_int, std::string& val_str, bool& is_null) {
-    if (offset >= rec.size()) return false;
+bool get_value(const unsigned char* rec, int rec_size, int offset, int type, int* val_int, char* val_str, bool* is_null) {
+    if (offset >= rec_size) return false;
     unsigned char len = rec[offset];
-    is_null = (len == 0);
-    if (is_null) return true;
+    *is_null = (len == 0);
+    if (*is_null) return true;
 
-    const unsigned char* data = rec.data() + offset + 1;
+    const unsigned char* data = rec + offset + 1;
     if (type == T_INT) {
-        memcpy(&val_int, data, sizeof(int));
+        memcpy(val_int, data, sizeof(int));
     } else {
-        val_str.assign((const char*)data, len);
+        memcpy(val_str, (const char*)data, len);
+        val_str[len] = '\0';
     }
     return true;
 }
+
+// This is a C-only version of sem_select without any C++ dependencies
+// Replace the existing sem_select function in db.cpp with this code
 
 int sem_select(token_list *t_list) {
     int rc = 0;
@@ -2007,20 +2007,19 @@ int sem_select(token_list *t_list) {
     char l_table_name[MAX_IDENT_LEN + 1] = {0};
     char r_table_name[MAX_IDENT_LEN + 1] = {0};
     bool do_join = false;
-    std::vector<SelectCondition> conditions;
+    
+    // Use C arrays instead of vectors
+    SelectCondition conditions[MAX_NUM_COL];
+    int num_conditions = 0;
+    
     OrderBy order_by = {{0}, false};
     bool has_order_by = false;
     
-    // Parse SELECT columns/aggregates
-    std::vector<std::string> select_cols;
-    std::vector<int> agg_funcs; // 0=none, F_SUM, F_AVG, F_COUNT
+    // Parse SELECT columns/aggregates - use C arrays
+    char select_cols[MAX_NUM_COL][MAX_TOK_LEN];
+    int agg_funcs[MAX_NUM_COL]; // 0=none, F_SUM, F_AVG, F_COUNT
+    int num_select_cols = 0;
     
-    // if (!cur_token || cur_token->tok_value != K_SELECT) return INVALID_STATEMENT;
-    // cur_token = cur_token->next;
-    // do_semantic already consumes K_SELECT
-
-
-
     bool select_star = false;
     if (cur_token && cur_token->tok_value == S_STAR) {
         select_star = true;
@@ -2037,15 +2036,16 @@ int sem_select(token_list *t_list) {
             
             if (cur_token->tok_value == S_STAR) {
                  if (func != F_COUNT) return INVALID_STATEMENT;
-                 select_cols.push_back("*");
+                 strcpy(select_cols[num_select_cols], "*");
             } else if (cur_token->tok_class == identifier) {
-                select_cols.push_back(cur_token->tok_string);
+                strcpy(select_cols[num_select_cols], cur_token->tok_string);
             } else {
                 rc = INVALID_COLUMN_NAME;
                 cur_token->tok_value = INVALID;
                 return rc;
             }
-            agg_funcs.push_back(func);
+            agg_funcs[num_select_cols] = func;
+            num_select_cols++;
             cur_token = cur_token->next;
 
             if (func) {
@@ -2065,7 +2065,7 @@ int sem_select(token_list *t_list) {
         }
     }
 
-    if (!select_star && select_cols.empty()) {
+    if (!select_star && num_select_cols == 0) {
         rc = INVALID_STATEMENT;
         if (cur_token) cur_token->tok_value = INVALID;
         return rc;
@@ -2123,24 +2123,24 @@ int sem_select(token_list *t_list) {
         bool has_condition = false;
         while (cur_token && cur_token->tok_value != K_ORDER && cur_token->tok_value != EOC) {
             has_condition = true;
-            SelectCondition cond;
-            memset(&cond, 0, sizeof(cond));
+            SelectCondition *cond = &conditions[num_conditions];
+            memset(cond, 0, sizeof(SelectCondition));
             
             if (cur_token->tok_class != identifier) {
                 rc = INVALID_COLUMN_NAME;
                 cur_token->tok_value = INVALID;
                 return rc;
             }
-            strcpy(cond.col_name, cur_token->tok_string);
+            strcpy(cond->col_name, cur_token->tok_string);
             cur_token = cur_token->next;
 
             if (cur_token->tok_value == K_IS) {
                 cur_token = cur_token->next;
                 if (cur_token->tok_value == K_NOT) {
-                    cond.is_not_null_check = true;
+                    cond->is_not_null_check = true;
                     cur_token = cur_token->next;
                 } else {
-                    cond.is_null_check = true;
+                    cond->is_null_check = true;
                 }
                 if (cur_token->tok_value != K_NULL) {
                     rc = INVALID_STATEMENT;
@@ -2154,20 +2154,18 @@ int sem_select(token_list *t_list) {
                     cur_token->tok_value = INVALID;
                     return rc;
                 }
-                cond.rel_op = cur_token->tok_value;
+                cond->rel_op = cur_token->tok_value;
                 cur_token = cur_token->next;
 
                 if (cur_token->tok_value == INT_LITERAL) {
-                    cond.val_type = T_INT;
-                    cond.int_val = atoi(cur_token->tok_string);
+                    cond->val_type = T_INT;
+                    cond->int_val = atoi(cur_token->tok_string);
                 } else if (cur_token->tok_value == STRING_LITERAL) {
-                    cond.val_type = T_CHAR;
-                    strcpy(cond.str_val, cur_token->tok_string);
+                    cond->val_type = T_CHAR;
+                    strcpy(cond->str_val, cur_token->tok_string);
                 } else if (cur_token->tok_value == K_NULL) {
-                     // Only = NULL allowed here if not using IS NULL syntax, but standard SQL uses IS NULL.
-                     // The parser in sem_delete allowed = NULL. Let's support it.
-                     if (cond.rel_op != S_EQUAL) return INVALID_STATEMENT;
-                     cond.is_null_check = true;
+                     if (cond->rel_op != S_EQUAL) return INVALID_STATEMENT;
+                     cond->is_null_check = true;
                 } else {
                     rc = INVALID_STATEMENT;
                     cur_token->tok_value = INVALID;
@@ -2177,10 +2175,10 @@ int sem_select(token_list *t_list) {
             }
 
             if (cur_token && (cur_token->tok_value == K_AND || cur_token->tok_value == K_OR)) {
-                cond.logic_op = cur_token->tok_value;
+                cond->logic_op = cur_token->tok_value;
                 cur_token = cur_token->next;
             }
-            conditions.push_back(cond);
+            num_conditions++;
         }
         if (!has_condition) {
             rc = INVALID_STATEMENT;
@@ -2218,36 +2216,61 @@ int sem_select(token_list *t_list) {
         return rc;
     }
 
-    // Execution
-    std::vector<ResultRow> results;
+    // Execution - allocate result rows dynamically
+    ResultRow *results = NULL;
+    int num_results = 0;
+    int max_results = 100; // Initial capacity
+    results = (ResultRow*)malloc(max_results * sizeof(ResultRow));
+    if (!results) return MEMORY_ERROR;
     
     // Load Left Table
     char filename[MAX_IDENT_LEN + 5];
     snprintf(filename, sizeof(filename), "%s.tab", l_table_name);
     FILE *f = fopen(filename, "rb");
-    if (!f) return FILE_OPEN_ERROR;
+    if (!f) {
+        free(results);
+        return FILE_OPEN_ERROR;
+    }
     
     table_file_header l_hdr;
     fread(&l_hdr, sizeof(l_hdr), 1, f);
     
-    std::vector<unsigned char> l_data(l_hdr.num_records * l_hdr.record_size);
+    unsigned char *l_data = (unsigned char*)malloc(l_hdr.num_records * l_hdr.record_size);
+    if (!l_data) {
+        free(results);
+        fclose(f);
+        return MEMORY_ERROR;
+    }
     fseek(f, l_hdr.record_offset, SEEK_SET);
-    fread(l_data.data(), l_hdr.record_size, l_hdr.num_records, f);
+    fread(l_data, l_hdr.record_size, l_hdr.num_records, f);
     fclose(f);
 
     if (do_join) {
         snprintf(filename, sizeof(filename), "%s.tab", r_table_name);
         f = fopen(filename, "rb");
-        if (!f) return FILE_OPEN_ERROR;
+        if (!f) {
+            free(l_data);
+            free(results);
+            return FILE_OPEN_ERROR;
+        }
         table_file_header r_hdr;
         fread(&r_hdr, sizeof(r_hdr), 1, f);
-        std::vector<unsigned char> r_data(r_hdr.num_records * r_hdr.record_size);
+        unsigned char *r_data = (unsigned char*)malloc(r_hdr.num_records * r_hdr.record_size);
+        if (!r_data) {
+            free(l_data);
+            free(results);
+            fclose(f);
+            return MEMORY_ERROR;
+        }
         fseek(f, r_hdr.record_offset, SEEK_SET);
-        fread(r_data.data(), r_hdr.record_size, r_hdr.num_records, f);
+        fread(r_data, r_hdr.record_size, r_hdr.num_records, f);
         fclose(f);
 
-        // Identify common columns
-        std::vector<std::pair<int, int>> common_cols; // l_offset, r_offset
+        // Identify common columns - use C arrays
+        int common_col_l_offsets[MAX_NUM_COL];
+        int common_col_r_offsets[MAX_NUM_COL];
+        int num_common_cols = 0;
+        
         cd_entry* l_cols = (cd_entry*)((char*)l_tpd + l_tpd->cd_offset);
         cd_entry* r_cols = (cd_entry*)((char*)r_tpd + r_tpd->cd_offset);
         
@@ -2256,7 +2279,9 @@ int sem_select(token_list *t_list) {
             int r_off = 0;
             for(int j=0; j<r_tpd->num_columns; ++j) {
                 if (strcasecmp(l_cols[i].col_name, r_cols[j].col_name) == 0) {
-                    common_cols.push_back({l_off, r_off});
+                    common_col_l_offsets[num_common_cols] = l_off;
+                    common_col_r_offsets[num_common_cols] = r_off;
+                    num_common_cols++;
                     break;
                 }
                 r_off += 1 + (r_cols[j].col_type == T_INT ? 4 : r_cols[j].col_len);
@@ -2267,78 +2292,168 @@ int sem_select(token_list *t_list) {
         // Nested Loop Join
         for(int i=0; i<l_hdr.num_records; ++i) {
             for(int j=0; j<r_hdr.num_records; ++j) {
-                unsigned char* l_ptr = l_data.data() + i * l_hdr.record_size;
-                unsigned char* r_ptr = r_data.data() + j * r_hdr.record_size;
+                unsigned char* l_ptr = l_data + i * l_hdr.record_size;
+                unsigned char* r_ptr = r_data + j * r_hdr.record_size;
                 
                 bool match = true;
-                for(auto& p : common_cols) {
-                    unsigned char* lp = l_ptr + p.first;
-                    unsigned char* rp = r_ptr + p.second;
-                    if (*lp != *rp) { match = false; break; } // Length mismatch
-                    if (*lp == 0) { match = false; break; } // NULL never matches
+                for(int c=0; c<num_common_cols; c++) {
+                    unsigned char* lp = l_ptr + common_col_l_offsets[c];
+                    unsigned char* rp = r_ptr + common_col_r_offsets[c];
+                    if (*lp != *rp) { match = false; break; }
+                    if (*lp == 0) { match = false; break; }
                     if (memcmp(lp+1, rp+1, *lp) != 0) { match = false; break; }
                 }
                 
                 if (match) {
-                    ResultRow row;
-                    row.l_rec.assign(l_ptr, l_ptr + l_hdr.record_size);
-                    row.r_rec.assign(r_ptr, r_ptr + r_hdr.record_size);
-                    results.push_back(row);
+                    if (num_results >= max_results) {
+                        max_results *= 2;
+                        ResultRow *temp = (ResultRow*)realloc(results, max_results * sizeof(ResultRow));
+                        if (!temp) {
+                            for(int k=0; k<num_results; k++) {
+                                free(results[k].l_rec);
+                                free(results[k].r_rec);
+                            }
+                            free(results);
+                            free(l_data);
+                            free(r_data);
+                            return MEMORY_ERROR;
+                        }
+                        results = temp;
+                    }
+                    results[num_results].l_rec = (unsigned char*)malloc(l_hdr.record_size);
+                    results[num_results].r_rec = (unsigned char*)malloc(r_hdr.record_size);
+                    if (!results[num_results].l_rec || !results[num_results].r_rec) {
+                        for(int k=0; k<=num_results; k++) {
+                            if (results[k].l_rec) free(results[k].l_rec);
+                            if (results[k].r_rec) free(results[k].r_rec);
+                        }
+                        free(results);
+                        free(l_data);
+                        free(r_data);
+                        return MEMORY_ERROR;
+                    }
+                    memcpy(results[num_results].l_rec, l_ptr, l_hdr.record_size);
+                    memcpy(results[num_results].r_rec, r_ptr, r_hdr.record_size);
+                    results[num_results].l_rec_size = l_hdr.record_size;
+                    results[num_results].r_rec_size = r_hdr.record_size;
+                    num_results++;
                 }
             }
         }
+        free(r_data);
     } else {
         for(int i=0; i<l_hdr.num_records; ++i) {
-            ResultRow row;
-            unsigned char* ptr = l_data.data() + i * l_hdr.record_size;
-            row.l_rec.assign(ptr, ptr + l_hdr.record_size);
-            results.push_back(row);
+            if (num_results >= max_results) {
+                max_results *= 2;
+                ResultRow *temp = (ResultRow*)realloc(results, max_results * sizeof(ResultRow));
+                if (!temp) {
+                    for(int k=0; k<num_results; k++) {
+                        free(results[k].l_rec);
+                    }
+                    free(results);
+                    free(l_data);
+                    return MEMORY_ERROR;
+                }
+                results = temp;
+            }
+            unsigned char* ptr = l_data + i * l_hdr.record_size;
+            results[num_results].l_rec = (unsigned char*)malloc(l_hdr.record_size);
+            if (!results[num_results].l_rec) {
+                for(int k=0; k<num_results; k++) {
+                    free(results[k].l_rec);
+                }
+                free(results);
+                free(l_data);
+                return MEMORY_ERROR;
+            }
+            memcpy(results[num_results].l_rec, ptr, l_hdr.record_size);
+            results[num_results].l_rec_size = l_hdr.record_size;
+            results[num_results].r_rec = NULL;
+            results[num_results].r_rec_size = 0;
+            num_results++;
         }
     }
 
-    // Apply WHERE
-    std::vector<ResultRow> filtered_results;
-    for(auto& row : results) {
-        bool keep = true;
-        if (!conditions.empty()) {
-            bool current_res = true;
-            int last_op = 0; // 0=start, K_AND, K_OR
+    free(l_data);
 
-            for(size_t k=0; k<conditions.size(); ++k) {
-                auto& cond = conditions[k];
+    // Apply WHERE filters
+    ResultRow *filtered_results = (ResultRow*)malloc(num_results * sizeof(ResultRow));
+    if (!filtered_results) {
+        for(int k=0; k<num_results; k++) {
+            free(results[k].l_rec);
+            if (results[k].r_rec) free(results[k].r_rec);
+        }
+        free(results);
+        return MEMORY_ERROR;
+    }
+    int num_filtered = 0;
+    
+    for(int r=0; r<num_results; r++) {
+        ResultRow *row = &results[r];
+        bool keep = true;
+        if (num_conditions > 0) {
+            bool current_res = true;
+            int last_op = 0;
+
+            for(int k=0; k<num_conditions; k++) {
+                SelectCondition *cond = &conditions[k];
                 bool cond_true = false;
                 
                 // Find column
                 int offset, type, len;
-                bool found = get_col_info(l_tpd, cond.col_name, offset, type, len);
+                bool found = get_col_info(l_tpd, cond->col_name, offset, type, len);
                 bool is_null = false;
                 int val_int = 0;
-                std::string val_str;
+                char val_str[MAX_TOK_LEN];
                 
                 if (found) {
-                    get_value(row.l_rec, offset, type, val_int, val_str, is_null);
+                    get_value(row->l_rec, row->l_rec_size, offset, type, &val_int, val_str, &is_null);
                 } else if (do_join) {
-                    found = get_col_info(r_tpd, cond.col_name, offset, type, len);
-                    if (found) get_value(row.r_rec, offset, type, val_int, val_str, is_null);
+                    found = get_col_info(r_tpd, cond->col_name, offset, type, len);
+                    if (found) get_value(row->r_rec, row->r_rec_size, offset, type, &val_int, val_str, &is_null);
                 }
                 
-                if (!found) return INVALID_COLUMN_NAME;
+                if (!found) {
+                    for(int kk=0; kk<num_results; kk++) {
+                        free(results[kk].l_rec);
+                        if (results[kk].r_rec) free(results[kk].r_rec);
+                    }
+                    free(results);
+                    free(filtered_results);
+                    return INVALID_COLUMN_NAME;
+                }
 
-                if (cond.is_null_check) cond_true = is_null;
-                else if (cond.is_not_null_check) cond_true = !is_null;
-                else if (is_null) cond_true = false; // Any op with NULL is false
+                if (cond->is_null_check) cond_true = is_null;
+                else if (cond->is_not_null_check) cond_true = !is_null;
+                else if (is_null) cond_true = false;
                 else {
                     if (type == T_INT) {
-                        if (cond.val_type != T_INT) return INVALID_STATEMENT; // Type mismatch
-                        if (cond.rel_op == S_EQUAL) cond_true = (val_int == cond.int_val);
-                        else if (cond.rel_op == S_LESS) cond_true = (val_int < cond.int_val);
-                        else if (cond.rel_op == S_GREATER) cond_true = (val_int > cond.int_val);
+                        if (cond->val_type != T_INT) {
+                            for(int kk=0; kk<num_results; kk++) {
+                                free(results[kk].l_rec);
+                                if (results[kk].r_rec) free(results[kk].r_rec);
+                            }
+                            free(results);
+                            free(filtered_results);
+                            return INVALID_STATEMENT;
+                        }
+                        if (cond->rel_op == S_EQUAL) cond_true = (val_int == cond->int_val);
+                        else if (cond->rel_op == S_LESS) cond_true = (val_int < cond->int_val);
+                        else if (cond->rel_op == S_GREATER) cond_true = (val_int > cond->int_val);
                     } else {
-                        if (cond.val_type != T_CHAR) return INVALID_STATEMENT;
-                        int cmp = strcmp(val_str.c_str(), cond.str_val);
-                        if (cond.rel_op == S_EQUAL) cond_true = (cmp == 0);
-                        else if (cond.rel_op == S_LESS) cond_true = (cmp < 0);
-                        else if (cond.rel_op == S_GREATER) cond_true = (cmp > 0);
+                        if (cond->val_type != T_CHAR) {
+                            for(int kk=0; kk<num_results; kk++) {
+                                free(results[kk].l_rec);
+                                if (results[kk].r_rec) free(results[kk].r_rec);
+                            }
+                            free(results);
+                            free(filtered_results);
+                            return INVALID_STATEMENT;
+                        }
+                        int cmp = strcmp(val_str, cond->str_val);
+                        if (cond->rel_op == S_EQUAL) cond_true = (cmp == 0);
+                        else if (cond->rel_op == S_LESS) cond_true = (cmp < 0);
+                        else if (cond->rel_op == S_GREATER) cond_true = (cmp > 0);
                     }
                 }
 
@@ -2347,104 +2462,133 @@ int sem_select(token_list *t_list) {
                     if (last_op == K_AND) current_res = current_res && cond_true;
                     else if (last_op == K_OR) current_res = current_res || cond_true;
                 }
-                last_op = cond.logic_op;
+                last_op = cond->logic_op;
             }
             keep = current_res;
         }
-        if (keep) filtered_results.push_back(row);
+        if (keep) {
+            filtered_results[num_filtered] = results[r];
+            num_filtered++;
+        } else {
+            free(results[r].l_rec);
+            if (results[r].r_rec) free(results[r].r_rec);
+        }
     }
+    free(results);
     results = filtered_results;
+    num_results = num_filtered;
 
-    // Apply ORDER BY
-    if (has_order_by) {
+    // Apply ORDER BY (simple bubble sort for simplicity)
+    if (has_order_by && num_results > 0) {
         int offset, type, len;
         bool found = get_col_info(l_tpd, order_by.col_name, offset, type, len);
         bool in_left = found;
         if (!found && do_join) {
             found = get_col_info(r_tpd, order_by.col_name, offset, type, len);
         }
-        if (!found) return INVALID_COLUMN_NAME;
-
-        std::sort(results.begin(), results.end(), [&](const ResultRow& a, const ResultRow& b) {
-            int val_a_int, val_b_int;
-            std::string val_a_str, val_b_str;
-            bool null_a, null_b;
-            
-            if (in_left) {
-                get_value(a.l_rec, offset, type, val_a_int, val_a_str, null_a);
-                get_value(b.l_rec, offset, type, val_b_int, val_b_str, null_b);
-            } else {
-                get_value(a.r_rec, offset, type, val_a_int, val_a_str, null_a);
-                get_value(b.r_rec, offset, type, val_b_int, val_b_str, null_b);
+        if (!found) {
+            for(int k=0; k<num_results; k++) {
+                free(results[k].l_rec);
+                if (results[k].r_rec) free(results[k].r_rec);
             }
+            free(results);
+            return INVALID_COLUMN_NAME;
+        }
 
-            if (null_a && null_b) return false;
-            if (null_a) return !order_by.desc; // NULLs first/last? Usually first ASC.
-            if (null_b) return order_by.desc;
+        // Bubble sort
+        for(int i=0; i<num_results-1; i++) {
+            for(int j=0; j<num_results-i-1; j++) {
+                ResultRow *a = &results[j];
+                ResultRow *b = &results[j+1];
+                
+                int val_a_int, val_b_int;
+                char val_a_str[MAX_TOK_LEN], val_b_str[MAX_TOK_LEN];
+                bool null_a, null_b;
+                
+                if (in_left) {
+                    get_value(a->l_rec, a->l_rec_size, offset, type, &val_a_int, val_a_str, &null_a);
+                    get_value(b->l_rec, b->l_rec_size, offset, type, &val_b_int, val_b_str, &null_b);
+                } else {
+                    get_value(a->r_rec, a->r_rec_size, offset, type, &val_a_int, val_a_str, &null_a);
+                    get_value(b->r_rec, b->r_rec_size, offset, type, &val_b_int, val_b_str, &null_b);
+                }
 
-            bool less = false;
-            if (type == T_INT) less = val_a_int < val_b_int;
-            else less = val_a_str < val_b_str;
+                bool should_swap = false;
+                if (null_a && !null_b) should_swap = order_by.desc;
+                else if (!null_a && null_b) should_swap = !order_by.desc;
+                else if (!null_a && !null_b) {
+                    bool less = false;
+                    if (type == T_INT) less = val_a_int < val_b_int;
+                    else less = strcmp(val_a_str, val_b_str) < 0;
+                    
+                    if (order_by.desc) should_swap = less;
+                    else should_swap = !less;
+                }
 
-            return less;
-        });
-        
-        if (order_by.desc) {
-             std::reverse(results.begin(), results.end());
+                if (should_swap) {
+                    ResultRow temp = results[j];
+                    results[j] = results[j+1];
+                    results[j+1] = temp;
+                }
+            }
         }
     }
 
     // Aggregates or Print
-    if (!agg_funcs.empty() && agg_funcs[0] != 0) {
-        // Aggregates
-        long long sum = 0;
-        double avg = 0;
-        int count = 0;
-        bool has_data = false;
+    if (num_select_cols > 0 && agg_funcs[0] != 0) {
+        // Aggregates with proper formatting
         
-        // Assuming single aggregate for now as per tests (or multiple simple ones)
-        // The tests check SELECT SUM(A), AVG(B) ...
-        // We need to print headers then values.
+        // Build column headers and calculate results first
+        char agg_headers[MAX_NUM_COL][64];
+        char results_str[MAX_NUM_COL][64];
+        int col_widths[MAX_NUM_COL];
         
-        printf("\n");
-        for(size_t i=0; i<select_cols.size(); ++i) {
-            if (i > 0) printf(" | ");
-            if (agg_funcs[i] == F_SUM) printf("SUM(%s)", select_cols[i].c_str());
-            else if (agg_funcs[i] == F_AVG) printf("AVG(%s)", select_cols[i].c_str());
-            else if (agg_funcs[i] == F_COUNT) printf("COUNT(%s)", select_cols[i].c_str());
-        }
-        printf("\n");
-        for(size_t i=0; i<select_cols.size(); ++i) {
-             if (i > 0) printf("---");
-             printf("----------");
-        }
-        printf("\n");
-
-        // Calculate
-        std::vector<std::string> results_str;
-        for(size_t k=0; k<select_cols.size(); ++k) {
-            int func = agg_funcs[k];
-            std::string col = select_cols[k];
+        for(int i=0; i<num_select_cols; i++) {
+            // Create header
+            if (agg_funcs[i] == F_SUM) snprintf(agg_headers[i], 64, "SUM(%s)", select_cols[i]);
+            else if (agg_funcs[i] == F_AVG) snprintf(agg_headers[i], 64, "AVG(%s)", select_cols[i]);
+            else if (agg_funcs[i] == F_COUNT) snprintf(agg_headers[i], 64, "COUNT(%s)", select_cols[i]);
             
-            if (func == F_COUNT && col == "*") {
-                results_str.push_back(std::to_string(results.size()));
+            col_widths[i] = strlen(agg_headers[i]);
+        }
+        
+        // Calculate aggregate values
+        for(int k=0; k<num_select_cols; k++) {
+            int func = agg_funcs[k];
+            char *col = select_cols[k];
+            
+            if (func == F_COUNT && strcmp(col, "*") == 0) {
+                snprintf(results_str[k], 64, "%d", num_results);
+                int val_width = strlen(results_str[k]);
+                if (val_width > col_widths[k]) col_widths[k] = val_width;
                 continue;
             }
 
             int offset, type, len;
-            bool found = get_col_info(l_tpd, col.c_str(), offset, type, len);
+            bool found = get_col_info(l_tpd, col, offset, type, len);
             bool in_left = found;
-            if (!found && do_join) found = get_col_info(r_tpd, col.c_str(), offset, type, len);
+            if (!found && do_join) found = get_col_info(r_tpd, col, offset, type, len);
             
-            if (!found) return INVALID_COLUMN_NAME;
+            if (!found) {
+                for(int kk=0; kk<num_results; kk++) {
+                    free(results[kk].l_rec);
+                    if (results[kk].r_rec) free(results[kk].r_rec);
+                }
+                free(results);
+                return INVALID_COLUMN_NAME;
+            }
 
             long long col_sum = 0;
             int col_count = 0;
             
-            for(auto& row : results) {
-                int val_int; std::string val_str; bool is_null;
-                if (in_left) get_value(row.l_rec, offset, type, val_int, val_str, is_null);
-                else get_value(row.r_rec, offset, type, val_int, val_str, is_null);
+            for(int r=0; r<num_results; r++) {
+                ResultRow *row = &results[r];
+                int val_int;
+                char val_str[MAX_TOK_LEN];
+                bool is_null;
+                
+                if (in_left) get_value(row->l_rec, row->l_rec_size, offset, type, &val_int, val_str, &is_null);
+                else get_value(row->r_rec, row->r_rec_size, offset, type, &val_int, val_str, &is_null);
                 
                 if (!is_null) {
                     if (type == T_INT) col_sum += val_int;
@@ -2452,104 +2596,297 @@ int sem_select(token_list *t_list) {
                 }
             }
             
-            if (func == F_COUNT) results_str.push_back(std::to_string(col_count));
-            else if (func == F_SUM) results_str.push_back(std::to_string(col_sum));
+            if (func == F_COUNT) snprintf(results_str[k], 64, "%d", col_count);
+            else if (func == F_SUM) snprintf(results_str[k], 64, "%lld", col_sum);
             else if (func == F_AVG) {
-                if (col_count == 0) results_str.push_back("0.00");
-                else results_str.push_back(std::to_string((double)col_sum / col_count));
+                if (col_count == 0) snprintf(results_str[k], 64, "0.00");
+                else snprintf(results_str[k], 64, "%.2f", (double)col_sum / col_count);
             }
+            
+            int val_width = strlen(results_str[k]);
+            if (val_width > col_widths[k]) col_widths[k] = val_width;
         }
         
-        for(size_t i=0; i<results_str.size(); ++i) {
+        // Print headers (right-justified for aggregate results)
+        printf("\n");
+        for(int i=0; i<num_select_cols; i++) {
             if (i > 0) printf(" | ");
-            printf("%s", results_str[i].c_str());
+            printf("%*s", col_widths[i], agg_headers[i]);
+        }
+        printf("\n");
+        
+        // Print separator
+        for(int i=0; i<num_select_cols; i++) {
+            if (i > 0) printf("-+-");
+            for(int j=0; j<col_widths[i]; j++) printf("-");
+        }
+        printf("\n");
+        
+        // Print results (right-justified for numbers)
+        for(int i=0; i<num_select_cols; i++) {
+            if (i > 0) printf(" | ");
+            printf("%*s", col_widths[i], results_str[i]);
         }
         printf("\n");
 
     } else {
-        // Print Rows
-        // Headers
-        printf("\n");
+        // Print Rows with proper formatting
+        // First, determine which columns to display and calculate column widths
+        int num_display_cols = 0;
+        char display_col_names[MAX_NUM_COL][MAX_TOK_LEN];
+        int display_col_types[MAX_NUM_COL];
+        int display_col_widths[MAX_NUM_COL];
+        
         if (select_star) {
-            // Print all L cols then R unique cols
             cd_entry* l_cols = (cd_entry*)((char*)l_tpd + l_tpd->cd_offset);
-            for(int i=0; i<l_tpd->num_columns; ++i) {
-                if (i > 0) printf(" | ");
-                printf("%s", l_cols[i].col_name);
+            for(int i=0; i<l_tpd->num_columns; i++) {
+                strcpy(display_col_names[num_display_cols], l_cols[i].col_name);
+                display_col_types[num_display_cols] = l_cols[i].col_type;
+                display_col_widths[num_display_cols] = strlen(l_cols[i].col_name);
+                num_display_cols++;
             }
             if (do_join) {
                 cd_entry* r_cols = (cd_entry*)((char*)r_tpd + r_tpd->cd_offset);
-                for(int i=0; i<r_tpd->num_columns; ++i) {
+                for(int i=0; i<r_tpd->num_columns; i++) {
                     bool common = false;
-                    for(int j=0; j<l_tpd->num_columns; ++j) {
-                        if (strcasecmp(l_cols[j].col_name, r_cols[i].col_name) == 0) { common = true; break; }
+                    for(int j=0; j<l_tpd->num_columns; j++) {
+                        if (strcasecmp(l_cols[j].col_name, r_cols[i].col_name) == 0) { 
+                            common = true; 
+                            break; 
+                        }
                     }
-                    if (!common) printf(" | %s", r_cols[i].col_name);
+                    if (!common) {
+                        strcpy(display_col_names[num_display_cols], r_cols[i].col_name);
+                        display_col_types[num_display_cols] = r_cols[i].col_type;
+                        display_col_widths[num_display_cols] = strlen(r_cols[i].col_name);
+                        num_display_cols++;
+                    }
                 }
             }
         } else {
-            for(size_t i=0; i<select_cols.size(); ++i) {
-                if (i > 0) printf(" | ");
-                printf("%s", select_cols[i].c_str());
+            for(int i=0; i<num_select_cols; i++) {
+                strcpy(display_col_names[num_display_cols], select_cols[i]);
+                // Determine type
+                int offset, type, len;
+                bool found = get_col_info(l_tpd, select_cols[i], offset, type, len);
+                if (!found && do_join) found = get_col_info(r_tpd, select_cols[i], offset, type, len);
+                display_col_types[num_display_cols] = type;
+                display_col_widths[num_display_cols] = strlen(select_cols[i]);
+                num_display_cols++;
+            }
+        }
+        
+        // Calculate max width for each column by scanning all data
+        for(int r=0; r<num_results; r++) {
+            ResultRow *row = &results[r];
+            if (select_star) {
+                int col_idx = 0;
+                int l_off = 0;
+                cd_entry* l_cols = (cd_entry*)((char*)l_tpd + l_tpd->cd_offset);
+                for(int i=0; i<l_tpd->num_columns; i++) {
+                    int val_int;
+                    char val_str[MAX_TOK_LEN];
+                    bool is_null;
+                    get_value(row->l_rec, row->l_rec_size, l_off, l_cols[i].col_type, &val_int, val_str, &is_null);
+                    
+                    int val_width;
+                    if (is_null) {
+                        val_width = 4; // "NULL"
+                    } else if (l_cols[i].col_type == T_INT) {
+                        char temp[32];
+                        snprintf(temp, sizeof(temp), "%d", val_int);
+                        val_width = strlen(temp);
+                    } else {
+                        val_width = strlen(val_str);
+                    }
+                    if (val_width > display_col_widths[col_idx]) {
+                        display_col_widths[col_idx] = val_width;
+                    }
+                    col_idx++;
+                    l_off += 1 + (l_cols[i].col_type == T_INT ? 4 : l_cols[i].col_len);
+                }
+                
+                if (do_join) {
+                    int r_off = 0;
+                    cd_entry* r_cols = (cd_entry*)((char*)r_tpd + r_tpd->cd_offset);
+                    for(int i=0; i<r_tpd->num_columns; i++) {
+                        bool common = false;
+                        for(int j=0; j<l_tpd->num_columns; j++) {
+                            if (strcasecmp(l_cols[j].col_name, r_cols[i].col_name) == 0) { 
+                                common = true; 
+                                break; 
+                            }
+                        }
+                        if (!common) {
+                            int val_int;
+                            char val_str[MAX_TOK_LEN];
+                            bool is_null;
+                            get_value(row->r_rec, row->r_rec_size, r_off, r_cols[i].col_type, &val_int, val_str, &is_null);
+                            
+                            int val_width;
+                            if (is_null) {
+                                val_width = 4;
+                            } else if (r_cols[i].col_type == T_INT) {
+                                char temp[32];
+                                snprintf(temp, sizeof(temp), "%d", val_int);
+                                val_width = strlen(temp);
+                            } else {
+                                val_width = strlen(val_str);
+                            }
+                            if (val_width > display_col_widths[col_idx]) {
+                                display_col_widths[col_idx] = val_width;
+                            }
+                            col_idx++;
+                        }
+                        r_off += 1 + (r_cols[i].col_type == T_INT ? 4 : r_cols[i].col_len);
+                    }
+                }
+            } else {
+                for(int i=0; i<num_select_cols; i++) {
+                    int offset, type, len;
+                    bool found = get_col_info(l_tpd, select_cols[i], offset, type, len);
+                    bool in_left = found;
+                    if (!found && do_join) found = get_col_info(r_tpd, select_cols[i], offset, type, len);
+                    
+                    if (found) {
+                        int val_int;
+                        char val_str[MAX_TOK_LEN];
+                        bool is_null;
+                        if (in_left) get_value(row->l_rec, row->l_rec_size, offset, type, &val_int, val_str, &is_null);
+                        else get_value(row->r_rec, row->r_rec_size, offset, type, &val_int, val_str, &is_null);
+                        
+                        int val_width;
+                        if (is_null) {
+                            val_width = 4;
+                        } else if (type == T_INT) {
+                            char temp[32];
+                            snprintf(temp, sizeof(temp), "%d", val_int);
+                            val_width = strlen(temp);
+                        } else {
+                            val_width = strlen(val_str);
+                        }
+                        if (val_width > display_col_widths[i]) {
+                            display_col_widths[i] = val_width;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Print Headers
+        printf("\n");
+        for(int i=0; i<num_display_cols; i++) {
+            if (i > 0) printf(" | ");
+            if (display_col_types[i] == T_INT) {
+                // Right-justify header for integers
+                printf("%*s", display_col_widths[i], display_col_names[i]);
+            } else {
+                // Left-justify header for strings
+                printf("%-*s", display_col_widths[i], display_col_names[i]);
             }
         }
         printf("\n");
-        // Separator
-        printf("--------------------------------------------------\n");
+        
+        // Print separator
+        for(int i=0; i<num_display_cols; i++) {
+            if (i > 0) printf("-+-");
+            for(int j=0; j<display_col_widths[i]; j++) printf("-");
+        }
+        printf("\n");
 
-        if (results.empty()) {
+        if (num_results == 0) {
             printf("(0 rows)\n");
         } else {
-            for(auto& row : results) {
+            // Print data rows with proper formatting
+            for(int r=0; r<num_results; r++) {
+                ResultRow *row = &results[r];
                 if (select_star) {
-                    // Print all L cols
+                    int col_idx = 0;
                     int l_off = 0;
                     cd_entry* l_cols = (cd_entry*)((char*)l_tpd + l_tpd->cd_offset);
-                    for(int i=0; i<l_tpd->num_columns; ++i) {
-                        if (i > 0) printf(" | ");
-                        int val_int; std::string val_str; bool is_null;
-                        get_value(row.l_rec, l_off, l_cols[i].col_type, val_int, val_str, is_null);
-                        if (is_null) printf("NULL");
-                        else if (l_cols[i].col_type == T_INT) printf("%d", val_int);
-                        else printf("%s", val_str.c_str());
+                    for(int i=0; i<l_tpd->num_columns; i++) {
+                        if (col_idx > 0) printf(" | ");
+                        int val_int;
+                        char val_str[MAX_TOK_LEN];
+                        bool is_null;
+                        get_value(row->l_rec, row->l_rec_size, l_off, l_cols[i].col_type, &val_int, val_str, &is_null);
                         
+                        if (is_null) {
+                            if (l_cols[i].col_type == T_INT) {
+                                printf("%*s", display_col_widths[col_idx], "NULL");
+                            } else {
+                                printf("%-*s", display_col_widths[col_idx], "NULL");
+                            }
+                        } else if (l_cols[i].col_type == T_INT) {
+                            printf("%*d", display_col_widths[col_idx], val_int);
+                        } else {
+                            printf("%-*s", display_col_widths[col_idx], val_str);
+                        }
+                        
+                        col_idx++;
                         l_off += 1 + (l_cols[i].col_type == T_INT ? 4 : l_cols[i].col_len);
                     }
                     if (do_join) {
                         int r_off = 0;
                         cd_entry* r_cols = (cd_entry*)((char*)r_tpd + r_tpd->cd_offset);
-                        for(int i=0; i<r_tpd->num_columns; ++i) {
+                        for(int i=0; i<r_tpd->num_columns; i++) {
                             bool common = false;
-                            for(int j=0; j<l_tpd->num_columns; ++j) {
-                                if (strcasecmp(l_cols[j].col_name, r_cols[i].col_name) == 0) { common = true; break; }
+                            for(int j=0; j<l_tpd->num_columns; j++) {
+                                if (strcasecmp(l_cols[j].col_name, r_cols[i].col_name) == 0) { 
+                                    common = true; 
+                                    break; 
+                                }
                             }
                             if (!common) {
                                 printf(" | ");
-                                int val_int; std::string val_str; bool is_null;
-                                get_value(row.r_rec, r_off, r_cols[i].col_type, val_int, val_str, is_null);
-                                if (is_null) printf("NULL");
-                                else if (r_cols[i].col_type == T_INT) printf("%d", val_int);
-                                else printf("%s", val_str.c_str());
+                                int val_int;
+                                char val_str[MAX_TOK_LEN];
+                                bool is_null;
+                                get_value(row->r_rec, row->r_rec_size, r_off, r_cols[i].col_type, &val_int, val_str, &is_null);
+                                
+                                if (is_null) {
+                                    if (r_cols[i].col_type == T_INT) {
+                                        printf("%*s", display_col_widths[col_idx], "NULL");
+                                    } else {
+                                        printf("%-*s", display_col_widths[col_idx], "NULL");
+                                    }
+                                } else if (r_cols[i].col_type == T_INT) {
+                                    printf("%*d", display_col_widths[col_idx], val_int);
+                                } else {
+                                    printf("%-*s", display_col_widths[col_idx], val_str);
+                                }
+                                col_idx++;
                             }
                             r_off += 1 + (r_cols[i].col_type == T_INT ? 4 : r_cols[i].col_len);
                         }
                     }
                 } else {
-                    for(size_t i=0; i<select_cols.size(); ++i) {
-                         if (i > 0) printf(" | ");
-                         int offset, type, len;
-                         bool found = get_col_info(l_tpd, select_cols[i].c_str(), offset, type, len);
-                         bool in_left = found;
-                         if (!found && do_join) found = get_col_info(r_tpd, select_cols[i].c_str(), offset, type, len);
-                         
-                         if (found) {
-                             int val_int; std::string val_str; bool is_null;
-                             if (in_left) get_value(row.l_rec, offset, type, val_int, val_str, is_null);
-                             else get_value(row.r_rec, offset, type, val_int, val_str, is_null);
-                             if (is_null) printf("NULL");
-                             else if (type == T_INT) printf("%d", val_int);
-                             else printf("%s", val_str.c_str());
-                         }
+                    for(int i=0; i<num_select_cols; i++) {
+                        if (i > 0) printf(" | ");
+                        int offset, type, len;
+                        bool found = get_col_info(l_tpd, select_cols[i], offset, type, len);
+                        bool in_left = found;
+                        if (!found && do_join) found = get_col_info(r_tpd, select_cols[i], offset, type, len);
+                        
+                        if (found) {
+                            int val_int;
+                            char val_str[MAX_TOK_LEN];
+                            bool is_null;
+                            if (in_left) get_value(row->l_rec, row->l_rec_size, offset, type, &val_int, val_str, &is_null);
+                            else get_value(row->r_rec, row->r_rec_size, offset, type, &val_int, val_str, &is_null);
+                            
+                            if (is_null) {
+                                if (type == T_INT) {
+                                    printf("%*s", display_col_widths[i], "NULL");
+                                } else {
+                                    printf("%-*s", display_col_widths[i], "NULL");
+                                }
+                            } else if (type == T_INT) {
+                                printf("%*d", display_col_widths[i], val_int);
+                            } else {
+                                printf("%-*s", display_col_widths[i], val_str);
+                            }
+                        }
                     }
                 }
                 printf("\n");
@@ -2557,10 +2894,15 @@ int sem_select(token_list *t_list) {
         }
     }
 
+    // Cleanup
+    for(int k=0; k<num_results; k++) {
+        free(results[k].l_rec);
+        if (results[k].r_rec) free(results[k].r_rec);
+    }
+    free(results);
+
     return rc;
 }
-
-
 int initialize_tpd_list() {
   int rc = 0;
   FILE *fhandle = NULL;
