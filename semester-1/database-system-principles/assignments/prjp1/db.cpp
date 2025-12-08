@@ -92,24 +92,18 @@ int get_token(char *command, token_list **tok_list) {
       cur++;
 
     if (cur && isalpha(*cur)) {
-      // find valid identifier
       int t_class;
       do {
         temp_string[i++] = *cur++;
       } while ((isalnum(*cur)) || (*cur == '_'));
 
       if (!(strchr(STRING_BREAK, *cur))) {
-        /* If the next char following the keyword or identifier
-           is not a blank, (, ), or a comma, then append this
-                 character to temp_string, and flag this as an error */
         temp_string[i++] = *cur++;
         add_to_list(tok_list, temp_string, error, INVALID);
         rc = INVALID;
         done = true;
       } else {
 
-        // We have an identifier with at least 1 character
-        // Now check if this ident is a keyword
         for (j = 0, found_keyword = false; j < TOTAL_KEYWORDS_PLUS_TYPE_NAMES;
              j++) {
           if ((strcasecmp(keyword_table[j], temp_string) == 0)) {
@@ -143,15 +137,11 @@ int get_token(char *command, token_list **tok_list) {
         }
       }
     } else if (isdigit(*cur)) {
-      // find valid number
       do {
         temp_string[i++] = *cur++;
       } while (isdigit(*cur));
 
       if (!(strchr(NUMBER_BREAK, *cur))) {
-        /* If the next char following the keyword or identifier
-           is not a blank or a ), then append this
-                 character to temp_string, and flag this as an error */
         temp_string[i++] = *cur++;
         add_to_list(tok_list, temp_string, error, INVALID);
         rc = INVALID;
@@ -167,7 +157,6 @@ int get_token(char *command, token_list **tok_list) {
     } else if ((*cur == '(') || (*cur == ')') || (*cur == ',') ||
                (*cur == '*') || (*cur == '=') || (*cur == '<') ||
                (*cur == '>')) {
-      /* Catch all the symbols here. Note: no look ahead here. */
       int t_value;
       switch (*cur) {
       case '(':
@@ -246,7 +235,6 @@ void add_to_list(token_list **tok_list, const char *tmp, int t_class, int t_valu
   token_list *cur = *tok_list;
   token_list *ptr = NULL;
 
-  // printf("%16s \t%d \t %d\n",tmp, t_class, t_value);
 
   ptr = (token_list *)calloc(1, sizeof(token_list));
   strcpy(ptr->tok_string, tmp);
@@ -363,7 +351,6 @@ int sem_create_table(token_list *t_list) {
   cur = t_list;
   if ((cur->tok_class != keyword) && (cur->tok_class != identifier) &&
       (cur->tok_class != type_name)) {
-    // Error
     rc = INVALID_TABLE_NAME;
     cur->tok_value = INVALID;
   } else {
@@ -374,7 +361,6 @@ int sem_create_table(token_list *t_list) {
       strcpy(tab_entry.table_name, cur->tok_string);
       cur = cur->next;
       if (cur->tok_value != S_LEFT_PAREN) {
-        // Error
         rc = INVALID_TABLE_DEFINITION;
         cur->tok_value = INVALID;
       } else {
@@ -385,7 +371,6 @@ int sem_create_table(token_list *t_list) {
         do {
           if ((cur->tok_class != keyword) && (cur->tok_class != identifier) &&
               (cur->tok_class != type_name)) {
-            // Error
             rc = INVALID_COLUMN_NAME;
             cur->tok_value = INVALID;
           } else {
@@ -406,7 +391,6 @@ int sem_create_table(token_list *t_list) {
 
               cur = cur->next;
               if (cur->tok_class != type_name) {
-                // Error
                 rc = INVALID_TYPE_NAME;
                 cur->tok_value = INVALID;
               } else {
@@ -594,7 +578,6 @@ int sem_drop_table(token_list *t_list) {
   cur = t_list;
   if ((cur->tok_class != keyword) && (cur->tok_class != identifier) &&
       (cur->tok_class != type_name)) {
-    // Error
     rc = INVALID_TABLE_NAME;
     cur->tok_value = INVALID;
   } else {
@@ -670,7 +653,6 @@ int sem_list_schema(token_list *t_list) {
 
     if ((cur->tok_class != keyword) && (cur->tok_class != identifier) &&
         (cur->tok_class != type_name)) {
-      // Error
       rc = INVALID_TABLE_NAME;
       cur->tok_value = INVALID;
     } else {
@@ -684,7 +666,6 @@ int sem_list_schema(token_list *t_list) {
 
           if ((cur->tok_class != keyword) && (cur->tok_class != identifier) &&
               (cur->tok_class != type_name)) {
-            // Error
             rc = INVALID_REPORT_FILE_NAME;
             cur->tok_value = INVALID;
           } else {
@@ -1981,26 +1962,7 @@ int sem_update_table(token_list *t_list)
 }
 
 
-struct SelectCondition {
-    char col_name[MAX_IDENT_LEN + 1];
-    int rel_op; 
-    bool is_null_check;
-    bool is_not_null_check;
-    int val_type; 
-    int int_val;
-    char str_val[MAX_TOK_LEN];
-    int logic_op; // K_AND, K_OR, 0
-};
 
-struct OrderBy {
-    char col_name[MAX_IDENT_LEN + 1];
-    bool desc;
-};
-
-struct ResultRow {
-    std::vector<unsigned char> l_rec;
-    std::vector<unsigned char> r_rec;
-};
 
 // Helper to get column info
 bool get_col_info(tpd_entry* tpd, const char* col_name, int& offset, int& type, int& len) {

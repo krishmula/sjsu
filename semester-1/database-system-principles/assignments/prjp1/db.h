@@ -5,6 +5,7 @@ db.h - This file contains all the structures, defines, and function
 
 #include <cstdio>
 #include <stdint.h>
+#include <vector>
 
 #define MAX_IDENT_LEN 16
 #define MAX_NUM_COL 16
@@ -108,6 +109,27 @@ typedef struct {
   int l_row; /* left row index, -1 if single-table and we reuse l_row */
   int r_row; /* right row index, -1 if no join */
 } selected_row;
+
+struct SelectCondition {
+    char col_name[MAX_IDENT_LEN + 1];
+    int rel_op; 
+    bool is_null_check;
+    bool is_not_null_check;
+    int val_type; 
+    int int_val;
+    char str_val[MAX_TOK_LEN];
+    int logic_op; // K_AND, K_OR, 0
+};
+
+struct OrderBy {
+    char col_name[MAX_IDENT_LEN + 1];
+    bool desc;
+};
+
+struct ResultRow {
+    std::vector<unsigned char> l_rec;
+    std::vector<unsigned char> r_rec;
+};
 
 /* This enum defines the different classes of tokens for
          semantic processing. */
