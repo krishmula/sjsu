@@ -1,0 +1,169 @@
+\documentclass{article}
+
+\usepackage{fullpage}
+%\usepackage{citesort}
+%\usepackage{url}
+%\usepackage{listings}
+\usepackage{color}
+
+
+% Commands for formatting figures
+\newcommand{\mydefhead}[2]{\multicolumn{2}{l}{{#1}}&\mbox{\emph{#2}}\\}
+\newcommand{\mydefcase}[2]{\qquad\qquad& #1 &\mbox{#2}\\}
+
+% Commands for language expressions and values
+\newcommand{\true}{\mbox{\tt true}}
+\newcommand{\false}{\mbox{\tt false}}\title{Operational Semantics for Bool* Language}
+\newcommand{\ife}[3]{\mbox{\tt if}~{#1}~\mbox{\tt then}~{#2}~\mbox{\tt else}~{#3}}
+\newcommand{\suc}[1]{\mbox{\tt succ}~{#1}}
+\newcommand{\prd}[1]{\mbox{\tt pred}~{#1}}
+
+% Big-step evaluation relation.
+% #1 is the expression.
+% #2 is the resulting value.
+\newcommand{\bstep}[2]{{#1} \Downarrow {#2}}
+
+% Command for formatting the name of the evaluation relation.
+\newcommand{\rel}[1]{ \mbox{\sc [#1]} }
+
+% Format for a big-step evaluation rule.
+% #1 is the name of the rule.
+% #2 are the premises.  Leave blank if there are none.
+% #3 is the conclusion.
+\newcommand{\bsrule}[3]{
+  \rel{#1} &
+  \frac{\strut\begin{array}{@{}c@{}} #2 \end{array}}
+       {\strut\begin{array}{@{}c@{}} #3 \end{array}}
+   \\~\\
+}
+
+\author{
+  Krishna Mula \\
+  San Jos\'{e} State University \\
+  krishna.mula@sjsu.edu
+  }
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+In this paper, we will provide a review of the big-step operational semantics
+for the Bool* language we discussed in class.
+\end{abstract}
+
+%%%%
+%\section{Introduction}
+
+Bool* is a very minimal language that allows us to experiment with operational semantics.
+
+First, we define the valid expressions in our language.
+These expressions dictate the possibilities of what expressions
+we may have in our source programs.
+(Note that other language might also have {\em statements}.
+Statements might not evaluate to a value;
+expressions always will.)
+
+\begin{figure}
+\caption{The Bool* language}
+\label{fig:lang}
+\[
+  \begin{array}{ll@{\qquad\qquad}l}
+  \mydefhead{e ::=\qquad\qquad\qquad\qquad}{Expressions}
+  \mydefcase{\true}{true value}
+  \mydefcase{\false}{false value}
+  \mydefcase{\ife e e e}{conditional expressions}
+  \mydefcase{\suc e}{successor}
+  \mydefcase{\prd e}{predecessor}
+  \\
+  \mydefhead{v ::=\qquad\qquad\qquad\qquad}{Values}
+  \mydefcase{\true}{true value}
+  \mydefcase{\false}{false value}
+  \mydefcase{i}{integers}
+\end{array}
+\]
+\end{figure}
+
+Figure~\ref{fig:lang} shows the list of expressions and values for the Bool* language.
+Expressions can be the value $\true$, the value $\false$,
+or the conditional expression $\ife e e e$.
+Note that conditional expressions have a recursive structure,
+with 3 sub-expressions.
+
+After evaluating a program, we should be able to produce a value in this language.
+(In other languages, we might hit a bad situation and need to crash instead;
+that won't happen in this language.)
+The valid values for Bool* are $\true$ and $\false$.
+
+With our expressions and values defined,
+we can now specify the semantics for our language.
+To do so, we will use the following big-step evaluation relation:
+
+\[
+  \bstep{e}{v}
+\]
+
+The above line should be read as ``the expression $e$ evaluates to the value $v$''.
+
+\begin{figure}
+\caption{Big-step semantics for BoolInt*}
+\label{fig:bigstep-boolint}
+  {\bf Evaluation Rules:~~~ \fbox{$\bstep{e}{v}$}} \\
+\[
+\begin{array}{r@{\qquad\qquad}c}
+\bsrule{B-Value}{}{
+  \bstep{v}{v}
+}
+\bsrule{B-IfTrue}{
+  \bstep{e_1}{\true} \\
+  \bstep{e_2}{v}
+}{
+  \bstep{\ife{e_1}{e_2}{e_3}}{v}
+}
+\bsrule{B-IfFalse}{
+  \bstep{e_1}{\false} \\
+  \bstep{e_3}{v}
+}{
+  \bstep{\ife{e_1}{e_2}{e_3}}{v}
+}
+\bsrule{B-Succ}{
+  \bstep{e}{i}
+}{
+  \bstep{\suc{e}}{i+1}
+}
+\bsrule{B-Pred}{
+  \bstep{e}{i}
+}{
+  \bstep{\prd{e}}{i-1}
+}
+\end{array}
+\]
+\end{figure}
+
+
+
+Figure~\ref{fig:bigstep} shows the big-step evaluation rules for the Bool* language.
+Of course, there are additional possible rules.
+
+The \rel{B-Value} rule applies when the expression (to the left of ``$\Downarrow$'')
+is also a value, as defined in Figure~\ref{fig:lang}.
+There are no premises for this rule (above the line),
+meaning that it is an {\em axiom}.
+This rule states that a value evaluates to itself,
+so that \true{} evaluates to \true{} and \false{} evaluates to \false{}.
+
+Two different rules are needed for handling conditional expressions.
+Which rule applies depends on the premises.
+
+For the \rel{B-IfTrue} rule,
+the premise states that $e_1$ evaluates to \true{}
+and $e_2$ evaluates to some value $v$.
+If the premise holds, then the result of evaluating the expression is the value $v$.
+The structure of \rel{B-IfFalse} is similar.
+
+The \rel{B-Succ} and \rel{B-Pred} rules are for handling the successor and predecessor operations.
+The premise for \rel{B-Succ} states that $e$ evaluates to some integer $i$.
+If the premise holds, then the result of evaluating $\suc{e}$ is $i+1$.
+The structure of \rel{B-Pred} is similar. If the premise holds, then the result of evaluating $\prd{e}$ is $i-1$.
+
+\end{document}
+
