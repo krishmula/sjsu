@@ -1,0 +1,125 @@
+\documentclass{article}
+
+\usepackage{fullpage}
+\usepackage{color}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% Formatting commands
+\newcommand{\mydefhead}[2]{\multicolumn{2}{l}{{#1}}&\mbox{\emph{#2}}\\}
+\newcommand{\mydefcase}[2]{\qquad\qquad& #1 &\mbox{#2}\\}
+
+% Language constructs
+\newcommand{\true}{\mbox{\tt true}}
+\newcommand{\false}{\mbox{\tt false}}
+\newcommand{\ife}[3]{\mbox{\tt if}~{#1}~\mbox{\tt then}~{#2}~\mbox{\tt else}~{#3}}
+\newcommand{\suc}[1]{\mbox{\tt succ}~{#1}}
+\newcommand{\prd}[1]{\mbox{\tt pred}~{#1}}
+\newcommand{\secr}[1]{\mbox{\tt secret}~{#1}}
+
+% Security Labels
+\newcommand{\low}{L}
+\newcommand{\high}{H}
+\newcommand{\join}{\sqcup}
+
+% Evaluation relations
+\newcommand{\bstep}[2]{{#1} \Downarrow {#2}}
+\newcommand{\rel}[1]{ \mbox{\sc [#1]} }
+\newcommand{\bsrule}[3]{
+  \rel{#1} &
+  \frac{\strut\begin{array}{@{}c@{}} #2 \end{array}}
+       {\strut\begin{array}{@{}c@{}} #3 \end{array}}
+   \\~\\
+}
+
+\author{Krishna Mula \\ San Jos\'{e} State University}
+\title{Operational Semantics for Secure Bool*}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document defines the big-step operational semantics for an extended version of Bool* that includes information flow security controls.
+\end{abstract}
+
+The language extends Bool* with a \texttt{secret} construct and tracks security labels on all values.
+This ensures that any computation depending on a secret value is itself marked as secret.
+
+Figure~\ref{fig:lang} defines the syntax. Values $v^\ell$ consist of a raw value $v$ annotated with a security label $\ell \in \{L, H\}$.
+We use the standard lattice where $L \sqsubseteq H$ and $\ell_1 \sqcup \ell_2$ is the least upper bound.
+
+\begin{figure}[h]
+\caption{Secure Bool* Syntax}
+\label{fig:lang}
+\[
+  \begin{array}{ll@{\qquad\qquad}l}
+  \mydefhead{e ::=\dots}{Expressions}
+  \mydefcase{\true}{true value}
+  \mydefcase{\false}{false value}
+  \mydefcase{i}{integers}
+  \mydefcase{\ife e e e}{conditional expressions}
+  \mydefcase{\suc e}{successor}
+  \mydefcase{\prd e}{predecessor}
+  \mydefcase{\secr e}{secret classification}
+  \\
+  \mydefhead{v ::=\dots}{Raw Values}
+  \mydefcase{\true}{true value}
+  \mydefcase{\false}{false value}
+  \mydefcase{i}{integers}
+  \\
+  \mydefhead{\hat{v} ::= v^\ell}{Annotated Values}
+\end{array}
+\]
+\end{figure}
+
+The evaluation judgment is $\bstep{e}{v^\ell}$, meaning $e$ evaluates to value $v$ with security label $\ell$.
+
+\begin{figure}[h]
+\caption{Evaluation Rules}
+\label{fig:rules}
+\[
+\begin{array}{r@{\qquad\qquad}c}
+\bsrule{B-Val}{}{
+  \bstep{v}{v^\low}
+}
+\bsrule{B-Secret}{
+  \bstep{e}{v^\ell}
+}{
+  \bstep{\secr{e}}{v^\high}
+}
+\bsrule{B-Succ}{
+  \bstep{e}{i^\ell}
+}{
+  \bstep{\suc{e}}{(i+1)^\ell}
+}
+\bsrule{B-Pred}{
+  \bstep{e}{i^\ell}
+}{
+  \bstep{\prd{e}}{(i-1)^\ell}
+}
+\bsrule{B-IfTrue}{
+  \bstep{e_1}{\true^{\ell_1}} \\
+  \bstep{e_2}{v^{\ell_2}}
+}{
+  \bstep{\ife{e_1}{e_2}{e_3}}{v^{\ell_1 \join \ell_2}}
+}
+\bsrule{B-IfFalse}{
+  \bstep{e_1}{\false^{\ell_1}} \\
+  \bstep{e_3}{v^{\ell_3}}
+}{
+  \bstep{\ife{e_1}{e_2}{e_3}}{v^{\ell_1 \join \ell_3}}
+}
+\end{array}
+\]
+\end{figure}
+
+\section*{Explanation of Rules}
+
+\begin{itemize}
+    \item \rel{B-Val}: Basic values start as public ($L$).
+    \item \rel{B-Secret}: The \texttt{secret} construct explicitly promotes any result to high security ($H$).
+    \item \rel{B-Succ/Pred}: Arithmetic operations preserve the security label of their input. If the input is secret, the result is secret.
+    \item \rel{B-IfTrue/False}: To prevent implicit information leaks, the security label of the result must reflect both the branch taken and the condition itself. We compute the final label as the join ($\sqcup$) of the condition's label $\ell_1$ and the branch result's label. If the condition is high security, the result becomes high security, hiding which branch was executed.
+\end{itemize}
+
+\end{document}

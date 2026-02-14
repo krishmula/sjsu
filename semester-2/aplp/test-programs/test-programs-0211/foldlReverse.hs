@@ -1,0 +1,2 @@
+myReverse :: [x] -> [x]
+foldl (
