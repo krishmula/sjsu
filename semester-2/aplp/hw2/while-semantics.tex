@@ -1,0 +1,312 @@
+\documentclass{article}
+
+\usepackage{fullpage}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+%\usepackagen{url}
+\usepackage{float}
+\usepackage{paralist}
+
+\floatstyle{boxed}
+\restylefloat{figure}
+
+% Commands for formatting figure
+\newcommand{\mydefhead}[2]{\multicolumn{2}{l}{{#1}}&\mbox{\emph{#2}}\\}
+\newcommand{\mydefcase}[2]{\qquad\qquad& #1 &\mbox{#2}\\}
+
+% Commands for language format
+\newcommand{\assign}[2]{#1~{:=}~#2}
+\newcommand{\ife}[3]{\mbox{\tt if}~{#1}~\mbox{\tt then}~{#2}~\mbox{\tt else}~{#3}}
+\newcommand{\whilee}[2]{\mbox{\tt while}~(#1)~#2}
+\newcommand{\true}{\mbox{\tt true}}
+\newcommand{\false}{\mbox{\tt false}}
+
+% Commands for small-step rules
+\newcommand{\rel}[1]{ \mbox{\sc [#1]} }
+\newcommand{\ssrule}[3]{
+  \rel{#1} &
+  \frac{\strut\begin{array}{@{}c@{}} #2 \end{array}}
+       {\strut\begin{array}{@{}c@{}} #3 \end{array}}
+   \\~\\
+}
+\newcommand{\sstep}[4]{{#1},{#2} \rightarrow {#3},{#4}}
+\newcommand{\ctxt}{C}
+
+% Commands for big-step rules
+\newcommand{\bstep}[4]{{#1},{#2} \Downarrow {#3},{#4}}
+\newcommand{\bsrule}[3]{
+  \rel{#1} &
+  \frac{\strut\begin{array}{@{}c@{}} #2 \end{array}}
+       {\strut\begin{array}{@{}c@{}} #3 \end{array}}
+   \\~\\
+}
+\newcommand{\ande}[2]{\mbox{\tt and}~{#1}~{#2}}
+\newcommand{\ore}[2]{\mbox{\tt or}~{#1}~{#2}}
+\newcommand{\note}[1]{\mbox{\tt not}~{#1}}
+
+\title{Homework 2: Operational Semantics for WHILE}
+
+\author{
+  CS 252: Advanced Programming Languages \\
+  Krishna Mula\\
+  San Jos\'{e} State University \\
+  }
+\date{}
+
+\begin{document}
+\maketitle
+
+%---------
+\section{Introduction}
+
+For this assignment,
+you will implement the semantics for a small imperative language, named WHILE.
+
+The language for WHILE is given in Figure~\ref{fig:lang}.
+Unlike the Bool* language we discussed previously,
+WHILE supports \emph{mutable references}.
+The state of these references is maintained in a \emph{store},
+a mapping of references to values.
+(``Store'' can be thought of as a synonym for heap.)
+Once we have mutable references, other language constructs become more useful,
+such as sequencing operations ($e_1;e_2$).
+
+
+%---------
+\section{Small-step semantics}
+
+The small-step semantics for WHILE are given in Figure~\ref{fig:smallstep}.
+Most of these rules are fairly straightforward, but there are a couple of points
+to note with the $\rel{ss-while}$ rule.
+First of all, this is the only rule that makes a more complex expression
+when it has finished.
+(This rule is much cleaner when specified with the big-step operational semantics.)
+
+Secondly, note the final value of this expression once the while loop completes.
+It will \emph{always} be {\false} when it completes.
+We could have created a special value, such as {\tt null},
+or we could have made the while loop a statement that returns no value.
+Both choices, however, would complicate our language needlessly.
+
+
+%---------
+\section{Big-step Semantics}
+
+The big-step semantics for WHILE are given in Figure~\ref{fig:bigstep}.
+In big-step (natural) semantics, a judgment $\bstep{e}{\sigma}{v}{\sigma'}$
+means that expression $e$ evaluated in store $\sigma$ produces value $v$
+and (possibly updated) store $\sigma'$.
+Unlike small-step semantics, each rule describes the complete evaluation
+of an expression in a single step.
+The while rule is notable: its condition is first evaluated, and if
+\true, the body is evaluated followed by a recursive big-step evaluation
+of the entire while expression again.
+The boolean extensions (\texttt{and}, \texttt{or}, \texttt{not}) use
+short-circuit evaluation: \texttt{and} does not evaluate its second
+argument if the first is \false, and \texttt{or} does not evaluate its
+second argument if the first is \true.
+
+
+%===========================================================
+% FIGURES
+%===========================================================
+
+\begin{figure}[H]
+\caption{The WHILE language}\label{fig:lang}
+\[
+\begin{array}{llr}
+  \mydefhead{e ::=\qquad\qquad\qquad\qquad}{Expressions}
+  \mydefcase{x}{variables/addresses}
+  \mydefcase{v}{values}
+  \mydefcase{\assign x e}{assignment}
+  \mydefcase{e; e}{sequential expressions}
+  \mydefcase{e ~op~ e}{binary operations}
+  \mydefcase{\ife e e e}{conditional expressions}
+  \mydefcase{\whilee e e}{while expressions}
+  \\
+  \mydefhead{v ::=\qquad\qquad\qquad\qquad}{Values}
+  \mydefcase{i}{integer values}
+  \mydefcase{b}{boolean values}
+  \\
+  op ::= & + ~|~ - ~|~ * ~|~ / ~|~ > ~|~ >= ~|~ < ~|~ <=  & \mbox{\emph{Binary operators}} \\
+\end{array}
+\]
+\end{figure}
+
+\begin{figure}[H]
+\caption{Small-step semantics for WHILE}\label{fig:smallstep}
+{\bf Runtime Syntax:}
+\[
+\begin{array}{rclcl}
+  \sigma & \in & {Store} \quad  & = & \quad {variable} ~\rightarrow ~v \\
+  \\
+\end{array}
+\]
+{\bf Evaluation Rules:~~~ \fbox{$\sstep{e}{\sigma}{e'}{\sigma'}$}} \\
+\[
+\begin{array}{r@{\qquad}l}
+\ssrule{ss-seqctx}{
+  \sstep{e_1}{\sigma}{e_1'}{\sigma'}
+}{
+  \sstep{e_1;e_2}{\sigma}{e_1';e_2}{\sigma'}
+}
+\ssrule{ss-seq}{
+}{
+  \sstep{v;e}{\sigma}{e}{\sigma}
+}
+\ssrule{ss-opctx1}{
+  \sstep{e_1}{\sigma}{e_1'}{\sigma'}
+}{
+  \sstep{e_1~op~e_2}{\sigma}{e_1'~op~e_2}{\sigma'}
+}
+\ssrule{ss-opctx2}{
+  \sstep{e_2}{\sigma}{e_2'}{\sigma'}
+}{
+  \sstep{v_1~op~e_2}{\sigma}{v_1~op~e_2'}{\sigma'}
+}
+\ssrule{ss-op}{
+  v = v_1 ~op~ v_2
+}{
+  \sstep{v_1~op~v_2}{\sigma}{v}{\sigma}
+}
+\end{array}
+\begin{array}{r@{\qquad}l}
+\ssrule{ss-var}{
+  x \in domain(\sigma) \qquad \sigma(x)=v
+}{
+  \sstep{x}{\sigma}{v}{\sigma}
+}
+\ssrule{ss-assignctx}{
+  \sstep{e_1}{\sigma}{e_1'}{\sigma'}
+}{
+  \sstep{\assign{x}{e}}{\sigma}{\assign{x}{e'}}{\sigma'}
+}
+\ssrule{ss-assign}{
+}{
+  \sstep{\assign{x}{v}}{\sigma}{v}{\sigma[x:=v]}
+}
+\ssrule{ss-iftrue}{
+}{
+  \sstep{\ife{\true}{e_1}{e_2}}{\sigma}{e_1}{\sigma}
+}
+\ssrule{ss-iffalse}{
+}{
+  \sstep{\ife{\false}{e_1}{e_2}}{\sigma}{e_2}{\sigma}
+}
+\end{array}
+\]
+\[
+\begin{array}{r@{\qquad}l}
+\ssrule{ss-ifctx}{
+  \sstep{e_1}{\sigma}{e_1'}{\sigma'}
+}{
+  \sstep{\ife{e_1}{e_2}{e_3}}{\sigma}{\ife{e_1'}{e_2}{e_3}}{\sigma'}
+}
+\ssrule{ss-while}{
+}{
+  \sstep{\whilee{e_1}{e_2}}{\sigma}{\ife{e_1}{e_2;\whilee{e_1}{e_2}}{\false}}{\sigma}
+}
+\end{array}
+\]
+\end{figure}
+
+\begin{figure}[H]\label{fig:bigstep}
+\caption{Big-step semantics for WHILE}
+{\bf Evaluation Rules:~~~ \fbox{$\bstep{e}{\sigma}{v}{\sigma'}$}} \\
+\[
+\begin{array}{r@{\qquad}l}
+\bsrule{bs-val}{
+}{
+  \bstep{v}{\sigma}{v}{\sigma}
+}
+\bsrule{bs-var}{
+  x \in domain(\sigma) \qquad \sigma(x)=v
+}{
+  \bstep{x}{\sigma}{v}{\sigma}
+}
+\bsrule{bs-assign}{
+  \bstep{e}{\sigma}{v}{\sigma'}
+}{
+  \bstep{\assign{x}{e}}{\sigma}{v}{\sigma'[x:=v]}
+}
+\bsrule{bs-seq}{
+  \bstep{e_1}{\sigma}{v_1}{\sigma'} \qquad
+  \bstep{e_2}{\sigma'}{v_2}{\sigma''}
+}{
+  \bstep{e_1;e_2}{\sigma}{v_2}{\sigma''}
+}
+\bsrule{bs-op}{
+  op \notin \{\text{And},\text{Or},\text{Not}\} \qquad
+  \bstep{e_1}{\sigma}{v_1}{\sigma'} \qquad
+  \bstep{e_2}{\sigma'}{v_2}{\sigma''} \quad
+  v = applyOp(op, v_1, v_2)
+}{
+  \bstep{e_1~op~e_2}{\sigma}{v}{\sigma''}
+}
+\bsrule{bs-iftrue}{
+  \bstep{e_1}{\sigma}{\true}{\sigma'} \qquad
+  \bstep{e_2}{\sigma'}{v}{\sigma''}
+}{
+  \bstep{\ife{e_1}{e_2}{e_3}}{\sigma}{v}{\sigma''}
+}
+\bsrule{bs-iffalse}{
+  \bstep{e_1}{\sigma}{\false}{\sigma'} \qquad
+  \bstep{e_3}{\sigma'}{v}{\sigma''}
+}{
+  \bstep{\ife{e_1}{e_2}{e_3}}{\sigma}{v}{\sigma''}
+}
+\bsrule{bs-while-false}{
+  \bstep{e_1}{\sigma}{\false}{\sigma'}
+}{
+  \bstep{\whilee{e_1}{e_2}}{\sigma}{\false}{\sigma'}
+}
+\bsrule{bs-while-true}{
+  \bstep{e_1}{\sigma}{\true}{\sigma'} \qquad
+  \bstep{e_2}{\sigma'}{v'}{\sigma''} \\
+  \bstep{\whilee{e_1}{e_2}}{\sigma''}{v}{\sigma'''}
+}{
+  \bstep{\whilee{e_1}{e_2}}{\sigma}{v}{\sigma'''}
+}
+\end{array}
+\]
+\[
+\begin{array}{r@{\qquad}l}
+\bsrule{bs-and-false}{
+  \bstep{e_1}{\sigma}{\false}{\sigma'}
+}{
+  \bstep{\ande{e_1}{e_2}}{\sigma}{\false}{\sigma'}
+}
+\bsrule{bs-and-true}{
+  \bstep{e_1}{\sigma}{\true}{\sigma'} \qquad
+  \bstep{e_2}{\sigma'}{v}{\sigma''}
+}{
+  \bstep{\ande{e_1}{e_2}}{\sigma}{v}{\sigma''}
+}
+\bsrule{bs-or-true}{
+  \bstep{e_1}{\sigma}{\true}{\sigma'}
+}{
+  \bstep{\ore{e_1}{e_2}}{\sigma}{\true}{\sigma'}
+}
+\bsrule{bs-or-false}{
+  \bstep{e_1}{\sigma}{\false}{\sigma'} \qquad
+  \bstep{e_2}{\sigma'}{v}{\sigma''}
+}{
+  \bstep{\ore{e_1}{e_2}}{\sigma}{v}{\sigma''}
+}
+\bsrule{bs-not-true}{
+  \bstep{e_1}{\sigma}{\true}{\sigma'}
+}{
+  \bstep{\note{e_1}}{\sigma}{\false}{\sigma'}
+}
+\bsrule{bs-not-false}{
+  \bstep{e_1}{\sigma}{\false}{\sigma'}
+}{
+  \bstep{\note{e_1}}{\sigma}{\true}{\sigma'}
+}
+\end{array}
+\]
+\end{figure}
+
+\end{document}
