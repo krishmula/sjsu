@@ -1,4 +1,0 @@
-> test
-> con
-
-> Lambda Calculus
