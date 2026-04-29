@@ -1,0 +1,261 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage{proof}   % for \infer
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+
+\geometry{margin=1in}
+
+\newcommand{\typeof}[2]{#1 : #2}
+\newcommand{\step}[2]{#1 \to #2}
+
+\title{Lab 14: Evaluation and Typing Rules}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Language Grammar}
+
+\[
+\begin{array}{rcll}
+e & ::= & \texttt{true} \\
+  & \mid & \texttt{false} \\
+  & \mid & i & \text{(integer literals)} \\
+  & \mid & s & \text{(string literals)} \\
+  & \mid & \texttt{succ}\ e \\
+  & \mid & \texttt{pred}\ e \\
+  & \mid & \texttt{iszero}\ e \\
+  & \mid & \texttt{if}\ e\ \texttt{then}\ e\ \texttt{else}\ e \\
+  & \mid & \texttt{concat}\ e\ e \\
+  & \mid & \texttt{isemptystr}\ e \\
+  & \mid & \texttt{strlen}\ e \\[6pt]
+T & ::= & \texttt{Bool} \mid \texttt{Int} \mid \texttt{String}
+\end{array}
+\]
+
+\noindent\textbf{Values} (fully-evaluated, irreducible expressions):
+\[
+v\ ::=\ \texttt{true}\ \mid\ \texttt{false}\ \mid\ i\ \mid\ s
+\]
+
+% ────────────────────────────────────────────────
+\section{Small-Step Evaluation Rules}
+% ────────────────────────────────────────────────
+
+\subsection*{\texttt{succ}}
+
+\[
+\infer[\textsc{E-Succ}]
+  {\texttt{succ}\ e \to \texttt{succ}\ e'}
+  {e \to e'}
+\qquad
+\infer[\textsc{E-SuccInt}]
+  {\texttt{succ}\ i \to i+1}
+  {}
+\]
+
+\subsection*{\texttt{pred}}
+
+\[
+\infer[\textsc{E-Pred}]
+  {\texttt{pred}\ e \to \texttt{pred}\ e'}
+  {e \to e'}
+\qquad
+\infer[\textsc{E-PredInt}]
+  {\texttt{pred}\ i \to i-1}
+  {}
+\]
+
+\subsection*{\texttt{iszero}}
+
+\[
+\infer[\textsc{E-IsZero}]
+  {\texttt{iszero}\ e \to \texttt{iszero}\ e'}
+  {e \to e'}
+\qquad
+\infer[\textsc{E-IsZeroTrue}]
+  {\texttt{iszero}\ 0 \to \texttt{true}}
+  {}
+\qquad
+\infer[\textsc{E-IsZeroFalse}\ (i \neq 0)]
+  {\texttt{iszero}\ i \to \texttt{false}}
+  {}
+\]
+
+\subsection*{\texttt{if}}
+
+\[
+\infer[\textsc{E-If}]
+  {\texttt{if}\ e\ \texttt{then}\ e_1\ \texttt{else}\ e_2
+   \to
+   \texttt{if}\ e'\ \texttt{then}\ e_1\ \texttt{else}\ e_2}
+  {e \to e'}
+\]
+
+\[
+\infer[\textsc{E-IfTrue}]
+  {\texttt{if}\ \texttt{true}\ \texttt{then}\ e_1\ \texttt{else}\ e_2 \to e_1}
+  {}
+\qquad
+\infer[\textsc{E-IfFalse}]
+  {\texttt{if}\ \texttt{false}\ \texttt{then}\ e_1\ \texttt{else}\ e_2 \to e_2}
+  {}
+\]
+
+\subsection*{\texttt{concat}}
+
+\[
+\infer[\textsc{E-Concat1}]
+  {\texttt{concat}\ e_1\ e_2 \to \texttt{concat}\ e_1'\ e_2}
+  {e_1 \to e_1'}
+\qquad
+\infer[\textsc{E-Concat2}]
+  {\texttt{concat}\ s\ e_2 \to \texttt{concat}\ s\ e_2'}
+  {e_2 \to e_2'}
+\]
+
+\[
+\infer[\textsc{E-ConcatStr}]
+  {\texttt{concat}\ s_1\ s_2 \to s_1 \mathbin{+\!\!+} s_2}
+  {}
+\]
+
+\noindent where $s_1 \mathbin{+\!\!+} s_2$ denotes string concatenation of literal values $s_1$ and $s_2$.
+
+\subsection*{\texttt{isemptystr}}
+
+\[
+\infer[\textsc{E-IsEmptyStr}]
+  {\texttt{isemptystr}\ e \to \texttt{isemptystr}\ e'}
+  {e \to e'}
+\]
+
+\[
+\infer[\textsc{E-IsEmptyStrTrue}]
+  {\texttt{isemptystr}\ \text{``''} \to \texttt{true}}
+  {}
+\qquad
+\infer[\textsc{E-IsEmptyStrFalse}\ (s \neq \text{``''})]
+  {\texttt{isemptystr}\ s \to \texttt{false}}
+  {}
+\]
+
+\subsection*{\texttt{strlen}}
+
+\[
+\infer[\textsc{E-StrLen}]
+  {\texttt{strlen}\ e \to \texttt{strlen}\ e'}
+  {e \to e'}
+\qquad
+\infer[\textsc{E-StrLenVal}]
+  {\texttt{strlen}\ s \to |s|}
+  {}
+\]
+
+\noindent where $|s|$ is the integer length of string literal $s$.
+
+% ────────────────────────────────────────────────
+\section{Typing Rules}
+% ────────────────────────────────────────────────
+
+\subsection*{Literals}
+
+\[
+\infer[\textsc{T-True}]
+  {\Gamma \vdash \texttt{true} : \texttt{Bool}}
+  {}
+\qquad
+\infer[\textsc{T-False}]
+  {\Gamma \vdash \texttt{false} : \texttt{Bool}}
+  {}
+\qquad
+\infer[\textsc{T-Int}]
+  {\Gamma \vdash i : \texttt{Int}}
+  {}
+\qquad
+\infer[\textsc{T-Str}]
+  {\Gamma \vdash s : \texttt{String}}
+  {}
+\]
+
+\subsection*{\texttt{succ} and \texttt{pred}}
+
+\[
+\infer[\textsc{T-Succ}]
+  {\Gamma \vdash \texttt{succ}\ e : \texttt{Int}}
+  {\Gamma \vdash e : \texttt{Int}}
+\qquad
+\infer[\textsc{T-Pred}]
+  {\Gamma \vdash \texttt{pred}\ e : \texttt{Int}}
+  {\Gamma \vdash e : \texttt{Int}}
+\]
+
+\subsection*{\texttt{iszero}}
+
+\[
+\infer[\textsc{T-IsZero}]
+  {\Gamma \vdash \texttt{iszero}\ e : \texttt{Bool}}
+  {\Gamma \vdash e : \texttt{Int}}
+\]
+
+\subsection*{\texttt{if}}
+
+\[
+\infer[\textsc{T-If}]
+  {\Gamma \vdash \texttt{if}\ e\ \texttt{then}\ e_1\ \texttt{else}\ e_2 : T}
+  {\Gamma \vdash e : \texttt{Bool}
+   & \Gamma \vdash e_1 : T
+   & \Gamma \vdash e_2 : T}
+\]
+
+\subsection*{\texttt{concat}}
+
+\[
+\infer[\textsc{T-Concat}]
+  {\Gamma \vdash \texttt{concat}\ e_1\ e_2 : \texttt{String}}
+  {\Gamma \vdash e_1 : \texttt{String}
+   & \Gamma \vdash e_2 : \texttt{String}}
+\]
+
+\subsection*{\texttt{isemptystr}}
+
+\[
+\infer[\textsc{T-IsEmptyStr}]
+  {\Gamma \vdash \texttt{isemptystr}\ e : \texttt{Bool}}
+  {\Gamma \vdash e : \texttt{String}}
+\]
+
+\subsection*{\texttt{strlen}}
+
+\[
+\infer[\textsc{T-StrLen}]
+  {\Gamma \vdash \texttt{strlen}\ e : \texttt{Int}}
+  {\Gamma \vdash e : \texttt{String}}
+\]
+
+\section*{Progress and Preservation}
+
+\textbf{Progress.}
+If $\typeof{e}{T}$, then $e$ is a value or $\exists\, e'$ with $\step{e}{e'}$.
+
+The typing rules enforce that every operator receives the right kind of argument.
+Because no well-typed expression can be an irreducible non-value, evaluation always has somewhere to go:
+integer operators (\texttt{succ}, \texttt{pred}, \texttt{iszero}) are only ever applied to integers,
+string operators (\texttt{concat}, \texttt{isemptystr}, \texttt{strlen}) only to strings,
+and the condition of \texttt{if} is always a boolean.
+
+\medskip
+\textbf{Preservation.}
+If $\typeof{e}{T}$ and $\step{e}{e'}$, then $\typeof{e'}{T}$.
+
+The type of an expression is invariant under evaluation because the computation rules produce
+results of the same type that the typing rules predict:
+integer arithmetic stays \texttt{Int}, comparisons and boolean tests produce \texttt{Bool},
+string concatenation stays \texttt{String}, \texttt{strlen} yields \texttt{Int},
+and both branches of \texttt{if} are required to share the same type $T$,
+so whichever branch is chosen, the result still has type $T$.
+
+\end{document}
