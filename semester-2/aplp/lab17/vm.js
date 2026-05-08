@@ -34,6 +34,8 @@ class VirtualMachine {
   evaluate(bytecodeFile) {
     this.bytecode = this.constructor.loadBytecode(bytecodeFile);
 
+    console.log("bytecode", this.bytecode);
+
     // Initializing the program counter to keep track of our
     // place within the program.
     this.pc = 0;

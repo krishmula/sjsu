@@ -48,6 +48,7 @@ class Compiler {
       
       tokens.push(...ln.split(/\s+/).filter(s=>s.length!==0));
     });
+    console.log("tokens", tokens);
     return tokens;
   }
 
@@ -280,6 +281,8 @@ class Compiler {
 
     let tokens = this.tokenize(contents);
     let asts = this.parse(tokens);
+
+    this.printAST(asts);
 
     // The bytecode size cannot be larger than MAX_BUFF_SIZE.
     this.bytecode = Buffer.alloc(MAX_BUFF_SIZE);

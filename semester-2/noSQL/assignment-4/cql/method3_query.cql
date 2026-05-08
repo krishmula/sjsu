@@ -1,0 +1,4 @@
+USE hw4;
+TRACING ON;
+SELECT * FROM citylist_mv WHERE city = 'NEW YORK' LIMIT 15;
+TRACING OFF;

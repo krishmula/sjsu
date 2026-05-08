@@ -1,0 +1,3 @@
+USE hw4;
+SELECT zip FROM citylist2
+WHERE state = 'CA' AND city = 'SAN JOSE' AND pop > 5000 AND pop < 10000 LIMIT 15 ALLOW FILTERING;

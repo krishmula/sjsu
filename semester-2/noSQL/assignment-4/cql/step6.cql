@@ -1,0 +1,2 @@
+USE hw4;
+SELECT zip FROM citylist_mv WHERE city = 'NEW YORK' AND pop > 20000 AND pop < 30000 LIMIT 15 ALLOW FILTERING;
