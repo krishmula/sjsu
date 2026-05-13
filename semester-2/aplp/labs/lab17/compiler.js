@@ -1,8 +1,8 @@
 "use strict";
 
-const fs = require('fs');
+const fs = require("fs");
 
-const opcodes = require('./op-codes.js').opcodes;
+const opcodes = require("./op-codes.js").opcodes;
 
 const MAX_BUFF_SIZE = 256;
 
@@ -29,24 +29,23 @@ class Compiler {
 
   /**
    * Tokenizes a Scheme file, stripping out any comments.
-   * 
+   *
    * @param {String} contents - Scheme file, as text.
-   * 
+   *
    * @returns {[String]} - Array of tokens, represented as strings.
    */
   tokenize(contents) {
-    let lines = contents.trim().split('\n')
+    let lines = contents.trim().split("\n");
     let tokens = [];
     lines.forEach((ln) => {
       // Ensuring that parens are always surrounded
       // by spaces to simplify parsing.
-      ln = ln.replaceAll("(", " ( ")
-             .replaceAll(")", " ) ");
+      ln = ln.replaceAll("(", " ( ").replaceAll(")", " ) ");
 
       // The comment character in Scheme is ';'
       ln = ln.replace(/;.*/, "");
-      
-      tokens.push(...ln.split(/\s+/).filter(s=>s.length!==0));
+
+      tokens.push(...ln.split(/\s+/).filter((s) => s.length !== 0));
     });
     console.log("tokens", tokens);
     return tokens;
@@ -56,15 +55,15 @@ class Compiler {
    * Parses a stream of tokens, returning an array of objects
    * representing the top-level Scheme lists in the program.
    * (Note that in Scheme, a list is treated as a function call.)
-   * 
+   *
    * @param {[String]} tokens - An array of tokens.
-   * 
+   *
    * @returns {[Object]} - The AST, as a JS object literal.
    */
   parse(tokens) {
     // The top level AST does not have a type.
-    let ast = { children: []};
-    for (let i=0; i<tokens.length; i++) {
+    let ast = { children: [] };
+    for (let i = 0; i < tokens.length; i++) {
       let tok = tokens[i];
       if (tok === "(") {
         let newAst = { parent: ast, type: LIST, children: [] };
@@ -81,7 +80,7 @@ class Compiler {
       } else if (tok.match(/^\w+$/)) {
         ast.children.push({ type: VAR, value: tok });
       } else {
-        ast.children.push({ type: OP, value: tok})
+        ast.children.push({ type: OP, value: tok });
       }
     }
     return ast.children;
@@ -89,20 +88,22 @@ class Compiler {
 
   /**
    * Prints out an AST, filtering out circular references.
-   * 
+   *
    * @param {Object} ast - The AST to print.
    */
   printAST(ast) {
-    console.log(`AST is ${JSON.stringify(ast, (key, value) => {
-      if (key === 'parent') return value.id;
-      else return value;
-    })}`);
+    console.log(
+      `AST is ${JSON.stringify(ast, (key, value) => {
+        if (key === "parent") return value.id;
+        else return value;
+      })}`,
+    );
   }
 
   /**
    * Writes a byte to the next position in the bytecode buffer,
    * updating the offset to the position for the new write.
-   * 
+   *
    * @param {Number} byte - A valid byte.
    */
   writeByte(byte) {
@@ -112,7 +113,7 @@ class Compiler {
   /**
    * Looks up the opcode by its mnemonic and writes it to
    * the bytecode buffer.
-   * 
+   *
    * @param {String} mnemonic - The mnemonic for the opcode.
    */
   writeOp(mnemonic) {
@@ -136,11 +137,11 @@ class Compiler {
   writeBytecode(ast) {
     if (ast.type === NUM) {
       // Numbers are just pushed on to the stack.
-      this.writeOp('PUSH1');
+      this.writeOp("PUSH1");
       this.writeByte(ast.value);
       return;
     } else if (ast.type === BOOL) {
-      this.writeOp('PUSH1');
+      this.writeOp("PUSH1");
       this.writeByte(ast.value ? 1 : 0);
       return;
     } else if (ast.type === VAR) {
@@ -148,9 +149,9 @@ class Compiler {
       if (o === undefined) {
         throw new Error(`Unbound variable: ${ast.value}`);
       }
-      this.writeOp('PUSH1');
+      this.writeOp("PUSH1");
       this.writeByte(o);
-      this.writeOp('MLOAD');
+      this.writeOp("MLOAD");
       return;
     }
 
@@ -168,7 +169,7 @@ class Compiler {
     switch (first.value) {
       case "println":
         this.writeBytecode(second);
-        this.writeOp('PRINT');
+        this.writeOp("PRINT");
         break;
 
       case "define": {
@@ -177,42 +178,44 @@ class Compiler {
         }
         this.varMap[second.value] = this.varOffset;
         this.writeBytecode(rest[0]);
-        this.writeOp('PUSH1');
+        this.writeOp("PUSH1");
         this.writeByte(this.varOffset);
-        this.writeOp('MSTORE');
+        this.writeOp("MSTORE");
         this.varOffset += 1;
         break;
       }
 
       case "if": {
         if (rest.length < 1) {
-          throw new Error(`if: expected at least test and one branch, got ${rest.length + 1} part(s).`);
+          throw new Error(
+            `if: expected at least test and one branch, got ${rest.length + 1} part(s).`,
+          );
         }
         let cons = rest[0];
         let alt = rest[1];
         if (alt === undefined) {
-          throw new Error('if: one-armed if is not supported.');
+          throw new Error("if: one-armed if is not supported.");
         }
         this.writeBytecode(second);
-        this.writeOp('PUSH1');
+        this.writeOp("PUSH1");
         this.writeByte(1);
-        this.writeOp('SWAP1');
-        this.writeOp('SUB');
-        this.writeOp('PUSH1');
+        this.writeOp("SWAP1");
+        this.writeOp("SUB");
+        this.writeOp("PUSH1");
         let elseImmPos = this.offset;
         this.writeByte(0);
-        this.writeOp('JUMPI');
+        this.writeOp("JUMPI");
         this.writeBytecode(cons);
-        this.writeOp('PUSH1');
+        this.writeOp("PUSH1");
         let endImmPos = this.offset;
         this.writeByte(0);
-        this.writeOp('JUMP');
+        this.writeOp("JUMP");
         let elseDest = this.offset;
         this.patchByteAt(elseDest, elseImmPos);
-        this.writeOp('JUMPDEST');
+        this.writeOp("JUMPDEST");
         this.writeBytecode(alt);
         let endDest = this.offset;
-        this.writeOp('JUMPDEST');
+        this.writeOp("JUMPDEST");
         this.patchByteAt(endDest, endImmPos);
         break;
       }
@@ -221,7 +224,7 @@ class Compiler {
         this.writeBytecode(second);
         rest.forEach((x) => {
           this.writeBytecode(x);
-          this.writeOp('ADD');
+          this.writeOp("ADD");
         });
         break;
 
@@ -229,7 +232,7 @@ class Compiler {
         this.writeBytecode(second);
         rest.forEach((x) => {
           this.writeBytecode(x);
-          this.writeOp('MUL');
+          this.writeOp("MUL");
         });
         break;
       }
@@ -241,7 +244,7 @@ class Compiler {
         }
         rest.forEach((x) => {
           this.writeBytecode(x);
-          this.writeOp('SUB');
+          this.writeOp("SUB");
         });
         break;
       }
@@ -266,18 +269,18 @@ class Compiler {
   /**
    * This method takes a scheme file, tokenizes and parses it,
    * and finally compiles it to binary bytecode.
-   * 
+   *
    * @param {String} fileName - The name of the scheme file.
-   * 
+   *
    * @returns {String} - The name of the bytecode file.
    */
   compileScheme(fileName) {
-    if (!fileName.toLowerCase().endsWith('.scm')) {
+    if (!fileName.toLowerCase().endsWith(".scm")) {
       throw new Error(`${fileName} does not end with a .scm extension.`);
     }
 
     fs.readFileSync(fileName);
-    let contents = fs.readFileSync(fileName, 'utf8');
+    let contents = fs.readFileSync(fileName, "utf8");
 
     let tokens = this.tokenize(contents);
     let asts = this.parse(tokens);
@@ -296,14 +299,14 @@ class Compiler {
     // The output file will have the same name as the input file,
     // except that '.scm' will be replaced with '.byco'.
     let outputFile = fileName.replace(/.scm\b/i, ".byco");
-    fs.writeFileSync(outputFile, this.bytecode.slice(0, this.offset, 'hex'));
+    fs.writeFileSync(outputFile, this.bytecode.slice(0, this.offset, "hex"));
 
     return outputFile;
   }
 }
 
 // Handling command line arguments.
-if (process.argv0 === 'node') {
+if (process.argv0 === "node") {
   process.argv.shift();
 }
 if (process.argv.length !== 2) {
@@ -318,3 +321,4 @@ console.log(`Compiling ${scmFile}...`);
 let bytecodeFile = cmplr.compileScheme(scmFile);
 
 console.log(`Bytecode written to ${bytecodeFile}.`);
+
